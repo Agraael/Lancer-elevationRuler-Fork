@@ -1,0 +1,69 @@
+{
+  "name": "elevationruler",
+  "title": "Elevation Ruler",
+  "id": "elevationruler",
+  "description": "Modify Foundry VTT ruler for use when dragging tokens, pathfinding, and measuring elevation.",
+  "version": "0.10.18",
+  "library": false,
+  "compatibility": {
+    "minimum": "12",
+    "verified": "12.331"
+  },
+  "authors": [
+    {
+      "name": "caewok",
+      "url": "https://github.com/caewok",
+      "discord": "caewok#9192"
+    }
+  ],
+  "relationships": {
+    "requires": [
+      {
+        "id": "lib-wrapper",
+        "type": "module",
+        "manifest": "https://raw.githubusercontent.com/ruipin/fvtt-lib-wrapper/master/module.json"
+      }
+    ]
+  },
+  "scripts": [
+    "/scripts/delaunator/delaunator.min.js",
+    "/scripts/delaunator/Constrainautor.min.js",
+    "/scripts/delaunator/cdt2d_bundle.js"
+  ],
+
+  "esmodules": [
+    "/scripts/module.js"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "languages/en.json"
+    },
+    {
+      "lang": "it",
+      "name": "Italiano",
+      "path": "languages/it.json"
+    },
+    {
+      "lang": "pt-BR",
+      "name": "Português (Brasil)",
+      "path": "languages/pt-BR.json"
+    },
+    {
+      "lang": "ru",
+      "name": "Русский",
+      "path": "languages/ru.json"
+    },
+    {
+      "lang": "pl",
+      "name": "Polski",
+      "path": "languages/pl.json"
+    }
+  ],
+  "url": "https://github.com/caewok/fvtt-elevation-ruler",
+  "manifest": "https://github.com/caewok/fvtt-elevation-ruler/releases/latest/download/module.json",
+  "download": "https://github.com/caewok/fvtt-elevation-ruler/releases/download/0.10.18/module.zip",
+  "license": "LICENSE",
+  "readme": "README.md"
+}
