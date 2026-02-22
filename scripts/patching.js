@@ -29,17 +29,17 @@ import { PATCHES as PATCHES_ClientSettings } from "./ModuleSettingsAbstract.js";
 
 const mergeObject = foundry.utils.mergeObject;
 const PATCHES = {
-  ClientKeybindings: PATCHES_ClientKeybindings,
-  ClientSettings: PATCHES_ClientSettings,
-  CombatTracker: PATCHES_CombatTracker,
-  "foundry.canvas.edges.CanvasEdges": PATCHES_CanvasEdges,
-  DrawingConfig: PATCHES_DrawingConfig,
-  "foundry.grid.GridlessGrid": PATCHES_GridlessGrid,
-  "foundry.grid.HexagonalGrid": PATCHES_HexagonalGrid,
-  "foundry.grid.SquareGrid": PATCHES_SquareGrid,
-  "CONFIG.Canvas.rulerClass": PATCHES_Ruler,
-  Token: mergeObject(mergeObject(PATCHES_Token, PATCHES_TokenPF), PATCHES_TokenHUD),
-  Wall: PATCHES_Wall
+    ClientKeybindings: PATCHES_ClientKeybindings,
+    ClientSettings: PATCHES_ClientSettings,
+    CombatTracker: PATCHES_CombatTracker,
+    "foundry.canvas.edges.CanvasEdges": PATCHES_CanvasEdges,
+    DrawingConfig: PATCHES_DrawingConfig,
+    "foundry.grid.GridlessGrid": PATCHES_GridlessGrid,
+    "foundry.grid.HexagonalGrid": PATCHES_HexagonalGrid,
+    "foundry.grid.SquareGrid": PATCHES_SquareGrid,
+    "CONFIG.Canvas.rulerClass": PATCHES_Ruler,
+    Token: mergeObject(mergeObject(PATCHES_Token, PATCHES_TokenPF), PATCHES_TokenHUD),
+    Wall: PATCHES_Wall
 };
 
 PATCHES.Token = mergeObject(PATCHES.Token, PATCHES_Token.HISTORY_PREVIEW);
@@ -48,14 +48,15 @@ export const PATCHER = new Patcher();
 
 
 export function initializePatching() {
-  PATCHER.addPatchesFromRegistrationObject(PATCHES);
-  PATCHER.registerGroup("BASIC");
-  PATCHER.registerGroup("PATHFINDING");
-  PATCHER.registerGroup("TOKEN_RULER");
-  PATCHER.registerGroup("SPEED_HIGHLIGHTING");
-  PATCHER.registerGroup("MOVEMENT_TRACKING");
-  PATCHER.registerGroup("HISTORY_PREVIEW");
+    PATCHER.addPatchesFromRegistrationObject(PATCHES);
+    PATCHER.registerGroup("BASIC");
+    PATCHER.registerGroup("PATHFINDING");
+    PATCHER.registerGroup("TOKEN_RULER");
+    PATCHER.registerGroup("SPEED_HIGHLIGHTING");
+    PATCHER.registerGroup("MOVEMENT_TRACKING");
+    PATCHER.registerGroup("HISTORY_PREVIEW");
 
-  if ( game.system.id !== "dnd5e" ) PATCHER.registerGroup("MOVEMENT_SELECTION");
+    if ( game.system.id !== "dnd5e" )
+        PATCHER.registerGroup("MOVEMENT_SELECTION");
 }
 

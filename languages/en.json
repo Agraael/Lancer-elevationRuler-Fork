@@ -101,5 +101,7 @@
     "elevationruler.up": "up",
     "elevationruler.down": "down",
     "elevationruler.added": "added",
-    "elevationruler.prior": "prior"
+    "elevationruler.prior": "prior",
+    "elevationruler.settings.terrain-height-tools.name": "Terrain Height Tools Integration",
+    "elevationruler.settings.terrain-height-tools.hint": "Enable integration with the Terrain Height Tools module to accurately determine the terrain height and apply matching movement penalties/bonuses."
 }
