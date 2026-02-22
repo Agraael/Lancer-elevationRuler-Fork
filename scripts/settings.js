@@ -50,6 +50,11 @@ const SETTINGS = {
     EUCLIDEAN_GRID_DISTANCE: "euclidean-grid-distance",
     AUTO_MOVEMENT_TYPE: "automatic-movement-type",
     COMBAT_HISTORY: "token-ruler-combat-history",
+    COMBAT_HISTORY_CLEAR: "combat-history-clear",
+    COMBAT_HISTORY_CLEAR_CHOICES: {
+      ROUND: "combat-history-clear-round",
+      TURN: "combat-history-clear-turn"
+    },
     FORCE_GRID_PENALTIES: "force-grid-penalties",
     TOKEN_MULTIPLIER: "token-terrain-multiplier",
     TOKEN_MULTIPLIER_FLAT: "token-terrain-multiplier-flat"
@@ -255,7 +260,7 @@ export class Settings extends ModuleSettingsAbstract {
       requiresReload: false
     });
 
-    if ( game.system.id === "dnd5e" ) {
+    if (game.system.id === "dnd5e") {
       register(KEYS.MEASURING.AUTO_MOVEMENT_TYPE, {
         name: localize(`${KEYS.MEASURING.AUTO_MOVEMENT_TYPE}.name`),
         hint: localize(`${KEYS.MEASURING.AUTO_MOVEMENT_TYPE}.hint`),
@@ -344,6 +349,20 @@ export class Settings extends ModuleSettingsAbstract {
       requiresReload: false
     });
 
+    register(KEYS.MEASURING.COMBAT_HISTORY_CLEAR, {
+      name: localize(`${KEYS.MEASURING.COMBAT_HISTORY_CLEAR}.name`),
+      hint: localize(`${KEYS.MEASURING.COMBAT_HISTORY_CLEAR}.hint`),
+      scope: "world",
+      config: true,
+      default: KEYS.MEASURING.COMBAT_HISTORY_CLEAR_CHOICES.ROUND,
+      type: String,
+      choices: {
+        [KEYS.MEASURING.COMBAT_HISTORY_CLEAR_CHOICES.ROUND]: localize(`${KEYS.MEASURING.COMBAT_HISTORY_CLEAR_CHOICES.ROUND}`),
+        [KEYS.MEASURING.COMBAT_HISTORY_CLEAR_CHOICES.TURN]: localize(`${KEYS.MEASURING.COMBAT_HISTORY_CLEAR_CHOICES.TURN}`)
+      },
+      requiresReload: false
+    });
+
     // ----- NOTE: Grid Terrain Measurement ----- //
     //     register(KEYS.GRID_TERRAIN.ALGORITHM, {
     //       name: localize(`${KEYS.GRID_TERRAIN.ALGORITHM}.name`),
@@ -402,7 +421,7 @@ export class Settings extends ModuleSettingsAbstract {
         { key: "Equal" }
       ],
       onDown: context => {
-        if ( canvas.controls?.ruler && !canvas.controls.ruler._isTokenRuler ) toggleTokenRulerWaypoint(context, true);
+        if (canvas.controls?.ruler && !canvas.controls.ruler._isTokenRuler) toggleTokenRulerWaypoint(context, true);
       },
       precedence: CONST.KEYBINDING_PRECEDENCE.NORMAL
     });
@@ -414,7 +433,7 @@ export class Settings extends ModuleSettingsAbstract {
         { key: "Minus" }
       ],
       onDown: context => {
-        if ( canvas.controls?.ruler && !canvas.controls.ruler._isTokenRuler ) toggleTokenRulerWaypoint(context, false);
+        if (canvas.controls?.ruler && !canvas.controls.ruler._isTokenRuler) toggleTokenRulerWaypoint(context, false);
       },
       precedence: CONST.KEYBINDING_PRECEDENCE.NORMAL
     });
@@ -426,7 +445,7 @@ export class Settings extends ModuleSettingsAbstract {
         { key: "Equal" }
       ],
       onDown: context => {
-        if ( canvas.controls?.ruler._isTokenRuler ) toggleTokenRulerWaypoint(context, true);
+        if (canvas.controls?.ruler._isTokenRuler) toggleTokenRulerWaypoint(context, true);
       },
       precedence: CONST.KEYBINDING_PRECEDENCE.NORMAL
     });
@@ -438,7 +457,7 @@ export class Settings extends ModuleSettingsAbstract {
         { key: "Minus" }
       ],
       onDown: context => {
-        if ( canvas.controls?.ruler._isTokenRuler ) toggleTokenRulerWaypoint(context, false);
+        if (canvas.controls?.ruler._isTokenRuler) toggleTokenRulerWaypoint(context, false);
       },
       precedence: CONST.KEYBINDING_PRECEDENCE.NORMAL
     });
@@ -452,12 +471,12 @@ export class Settings extends ModuleSettingsAbstract {
       onDown: () => {
         this.FORCE_TOGGLE_PATHFINDING ||= true;
         const ruler = canvas.controls.ruler;
-        if ( ruler._state === Ruler.STATES.MEASURING ) ruler.measure(ruler.destination, { force: true });
+        if (ruler._state === Ruler.STATES.MEASURING) ruler.measure(ruler.destination, { force: true });
       },
       onUp: () => {
         this.FORCE_TOGGLE_PATHFINDING &&= false;
         const ruler = canvas.controls.ruler;
-        if ( ruler._state === Ruler.STATES.MEASURING ) ruler.measure(ruler.destination, { force: true });
+        if (ruler._state === Ruler.STATES.MEASURING) ruler.measure(ruler.destination, { force: true });
       },
       precedence: CONST.KEYBINDING_PRECEDENCE.NORMAL
     });
@@ -470,7 +489,7 @@ export class Settings extends ModuleSettingsAbstract {
       ],
       onDown: _context => {
         const ruler = canvas.controls.ruler;
-        if ( !ruler.active ) return;
+        if (!ruler.active) return;
         this.FORCE_TO_GROUND = !this.FORCE_TO_GROUND;
         ruler.waypoints.at(-1)._forceToGround = this.FORCE_TO_GROUND;
 
@@ -498,12 +517,12 @@ export class Settings extends ModuleSettingsAbstract {
       onDown: () => {
         this.FORCE_FREE_MOVEMENT ||= true;
         const ruler = canvas.controls.ruler;
-        if ( ruler._state === Ruler.STATES.MEASURING ) ruler.measure(ruler.destination, { force: true });
+        if (ruler._state === Ruler.STATES.MEASURING) ruler.measure(ruler.destination, { force: true });
       },
       onUp: () => {
         this.FORCE_FREE_MOVEMENT &&= false;
         const ruler = canvas.controls.ruler;
-        if ( ruler._state === Ruler.STATES.MEASURING ) ruler.measure(ruler.destination, { force: true });
+        if (ruler._state === Ruler.STATES.MEASURING) ruler.measure(ruler.destination, { force: true });
       },
       precedence: CONST.KEYBINDING_PRECEDENCE.NORMAL
     });
@@ -511,7 +530,7 @@ export class Settings extends ModuleSettingsAbstract {
 
   static togglePathfinding(enable) {
     enable ??= Settings.get(Settings.KEYS.PATHFINDING.ENABLE);
-    if ( enable ) this.#enablePathfinding();
+    if (enable) this.#enablePathfinding();
     else this.#disablePathfinding();
     updatePathfindingControl();
     ui.controls.render(true);
@@ -550,11 +569,11 @@ export class Settings extends ModuleSettingsAbstract {
   static setTokenBlocksPathfinding(blockSetting) {
     blockSetting ??= Settings.get(Settings.KEYS.PATHFINDING.TOKENS_BLOCK);
     BorderEdge.tokenBlockType = this._tokenBlockType(blockSetting);
-    if ( !Settings.get(Settings.KEYS.PATHFINDING.ENABLE) ) return;
+    if (!Settings.get(Settings.KEYS.PATHFINDING.ENABLE)) return;
 
-    if ( this.useTokensInPathfinding ) {
+    if (this.useTokensInPathfinding) {
       PATCHER.registerGroup("PATHFINDING_TOKENS");
-      for ( const token of canvas.tokens.placeables ) SCENE_GRAPH.addToken(token);
+      for (const token of canvas.tokens.placeables) SCENE_GRAPH.addToken(token);
     } else {
       PATCHER.deregisterGroup("PATHFINDING_TOKENS");
       SCENE_GRAPH.tokenIds.forEach(id => SCENE_GRAPH.removeToken(id));
@@ -562,7 +581,7 @@ export class Settings extends ModuleSettingsAbstract {
 
     Pathfinder.dirty = true;
     const res = SCENE_GRAPH._checkInternalConsistency();
-    if ( !res.allConsistent ) {
+    if (!res.allConsistent) {
       log("WallTracer|setTokenBlocksPathfinding resulted in inconsistent graph.", SCENE_GRAPH, res);
       SCENE_GRAPH._reset();
     }
@@ -589,16 +608,16 @@ export class Settings extends ModuleSettingsAbstract {
    * @returns {boolean} True if speed highlighting should be used.
    */
   static useSpeedHighlighting(token) {
-    if ( !token || !token.actor ) return false;
+    if (!token || !token.actor) return false;
     const SH = this.KEYS.SPEED_HIGHLIGHTING;
     const choice = this.get(SH.CHOICE);
-    if ( choice === SH.CHOICES.NEVER
-      || (choice === SH.CHOICES.COMBAT && !game.combat?.started) ) return false;
-    if ( game.user.isGM || !this.get(SH.NO_HOSTILES) ) return true;
+    if (choice === SH.CHOICES.NEVER
+      || (choice === SH.CHOICES.COMBAT && !game.combat?.started)) return false;
+    if (game.user.isGM || !this.get(SH.NO_HOSTILES)) return true;
 
     // For hostiles, true if Observer or token is not hostile.
-    if ( token.actor.testUserPermission(game.user, "OBSERVER") ) return true;
-    if ( token.document.disposition < 0 ) return false;
+    if (token.actor.testUserPermission(game.user, "OBSERVER")) return true;
+    if (token.document.disposition < 0) return false;
     return true;
   }
 
@@ -614,17 +633,17 @@ let MOVE_TIME = 0;
 function toggleTokenRulerWaypoint(context, add = true) {
   const position = canvas.mousePosition;
   const ruler = canvas.controls.ruler;
-  if ( !canvas.tokens.active || !ruler || !ruler.active ) return;
+  if (!canvas.tokens.active || !ruler || !ruler.active) return;
   log(`${add ? "add" : "remove"}TokenRulerWaypoint`);
 
   // Keep track of when we last added/deleted a waypoint.
   const now = Date.now();
   const delta = now - MOVE_TIME;
-  if ( delta < 100 ) return true; // Throttle keyboard movement once per 100ms
+  if (delta < 100) return true; // Throttle keyboard movement once per 100ms
   MOVE_TIME = now;
 
   log(`${add ? "adding" : "removing"}TokenRulerWaypoint`);
-  if ( add ) ruler._addWaypoint(position);
-  else if ( ruler.waypoints.length > 1 ) ruler._removeWaypoint(position); // Removing the last waypoint throws errors.
+  if (add) ruler._addWaypoint(position);
+  else if (ruler.waypoints.length > 1) ruler._removeWaypoint(position); // Removing the last waypoint throws errors.
 }
 

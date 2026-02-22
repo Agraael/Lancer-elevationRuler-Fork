@@ -667,7 +667,6 @@ function highlightSegmentWithTokenShape(ruler, segment, tokenShape, color) {
     } else {
       if (size % 2 === 0) {
         offset.y = canvas.grid.sizeY / 2;
-
       }
     }
   }

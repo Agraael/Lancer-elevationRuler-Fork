@@ -433,9 +433,33 @@ Hooks.on("combatStart", (combat, _updateData) => {
 });
 
 /**
+ * Hook updateCombat to clear movement history at the start of a token's turn
+ */
+Hooks.on("updateCombat", (combat, updateData, _updateOptions) => {
+  const clearSetting = Settings.get(Settings.KEYS.MEASURING.COMBAT_HISTORY_CLEAR);
+  if (clearSetting !== Settings.KEYS.MEASURING.COMBAT_HISTORY_CLEAR_CHOICES.TURN) return;
+
+  // Only proceed if it is a turn change
+  if (!updateData.turn && !updateData.round) return;
+
+  const combatant = combat.combatant;
+  if (!combatant) return;
+
+  const token = combatant.token?.object;
+  if (token && token[MODULE_ID]?.measurementHistory) {
+    token[MODULE_ID].measurementHistory = [];
+  }
+
+  // Clear visual preview
+  clearHistoryPathSimple();
+});
+
+/**
  * Hook combatRound to clear movement history at the beginning of each new round
  */
 Hooks.on("combatRound", (combat, updateData, _updateOptions) => {
+  const clearSetting = Settings.get(Settings.KEYS.MEASURING.COMBAT_HISTORY_CLEAR);
+  if (clearSetting === Settings.KEYS.MEASURING.COMBAT_HISTORY_CLEAR_CHOICES.TURN) return;
 
   // Clear in-memory history for all tokens in the combat
   combat.combatants.forEach(combatant => {

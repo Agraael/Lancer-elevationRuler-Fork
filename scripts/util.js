@@ -389,11 +389,14 @@ export function getTokenShape(token) {
     ]);
   }
 
-  // Handle alternative orientation
-  // TEMPORARILY DISABLED - Testing if this causes the inverted shape issue
-  // if (getAltOrientationFlagForToken(token, size)) {
-  //   shape.forEach(space => (space.y *= -1));
-  // }
+  // Handle alternative orientation for Variant 2 shapes
+  // Handle alternative orientation for Variant 2 shapes
+  if (token.document.hexagonalShape && token.document.hexagonalShape % 2 !== 0) {
+    if (size % 2 === 0) {
+        shape.forEach(space => (space.x = -1 - space.x));
+        shape.forEach(space => (space.y = -1 - space.y));
+    }
+  }
 
   // Handle columnar vs row-based hex grids
   if (canvas.grid.grid.columnar) {
