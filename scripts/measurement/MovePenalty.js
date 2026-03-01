@@ -113,6 +113,9 @@ export class MovePenalty {
     /** @type {Set<Token>} */
     tokens = new Set();
 
+    /** @type {Set<MeasuredTemplate>} */
+    templates = new Set();
+
     /** @type {Set<Region>} */
     pathRegions = new Set();
 
@@ -121,6 +124,9 @@ export class MovePenalty {
 
     /** @type {Set<Token>} */
     pathTokens = new Set();
+
+    /** @type {Set<MeasuredTemplate>} */
+    pathTemplates = new Set();
 
     /** @type {MOVEMENT_TYPES} */
     movementType = MOVEMENT_TYPES.WALK;
@@ -155,6 +161,12 @@ export class MovePenalty {
             if ((!useFlatPenalty && penalty !== 1) || (useFlatPenalty && penalty !== 0))
                 this.drawings.add(d);
         });
+        canvas.templates.placeables.forEach(t => {
+            const penalty = t.document.getFlag(MODULE_ID, FLAGS.MOVEMENT_PENALTY) ?? 1;
+            const useFlatPenalty = t.document.getFlag(MODULE_ID, FLAGS.MOVEMENT_PENALTY_FLAT);
+            if ((!useFlatPenalty && penalty !== 1) || (useFlatPenalty && penalty !== 0))
+                this.templates.add(t);
+        });
         this.tokens.delete(moveToken);
 
         // Remove certain hidden tokens.
@@ -166,6 +178,7 @@ export class MovePenalty {
         this.tokens.forEach(t => this.pathTokens.add(t));
         this.drawings.forEach(d => this.pathDrawings.add(d));
         this.regions.forEach(r => this.pathRegions.add(r));
+        this.templates.forEach(t => this.pathTemplates.add(t));
 
         // Set up a token clone without any terrains to use in estimating movement.
         this.#localTokenClone = TokenClone.fromToken(this.moveToken);
@@ -180,8 +193,9 @@ export class MovePenalty {
         this.pathTokens.clear();
         this.pathDrawings.clear();
         this.pathRegions.clear();
+        this.pathTemplates.clear();
 
-        // Locate all the regions/drawings/tokens along the path, testing using 2d bounds.
+        // Locate all the regions/drawings/tokens/templates along the path, testing using 2d bounds.
         for (let i = 1, n = path.length; i < n; i += 1) {
             const a = path[i - 1].center;
             const b = path[i].center;
@@ -196,6 +210,10 @@ export class MovePenalty {
             this.regions.forEach(r => {
                 if (r.bounds.lineSegmentIntersects(a, b, { inside: true }))
                     this.pathRegions.add(r);
+            });
+            this.templates.forEach(t => {
+                if (t.bounds.lineSegmentIntersects(a, b, { inside: true }))
+                    this.pathTemplates.add(t);
             });
         }
     }
@@ -267,7 +285,7 @@ export class MovePenalty {
 
     /** @type {boolean} */
     get anyPotentialObstacles() {
-        return this.pathTokens.size || this.pathRegions.size || this.pathDrawings.size;
+        return this.pathTokens.size || this.pathRegions.size || this.pathDrawings.size || this.pathTemplates.size;
     }
 
     #penaltyCache = new Map();
@@ -449,6 +467,16 @@ export class MovePenalty {
         drawings.forEach(d => {
             const penalty = d.document.getFlag(MODULE_ID, FLAGS.MOVEMENT_PENALTY);
             if (d.document.getFlag(MODULE_ID, FLAGS.MOVEMENT_PENALTY_FLAT))
+                flatPenalty += penalty;
+            else
+                currentMultiplier *= penalty;
+        });
+
+        // Templates (difficult terrain) - same approach as _getTerrainHeightToolsAtTokenShape
+        const templates = this._getTemplatesAtTokenShape(prevCoords, coords);
+        templates.forEach(t => {
+            const penalty = t.document.getFlag(MODULE_ID, FLAGS.MOVEMENT_PENALTY);
+            if (t.document.getFlag(MODULE_ID, FLAGS.MOVEMENT_PENALTY_FLAT))
                 flatPenalty += penalty;
             else
                 currentMultiplier *= penalty;
@@ -745,6 +773,62 @@ export class MovePenalty {
             }
         }
         return uniqueTerrains;
+    }
+
+    /**
+   * Get all templates (difficult terrain zones) covering the token's grid spaces at coords.
+   * Mirrors _getTerrainHeightToolsAtTokenShape: uses coords + token shape to check all occupied hexes.
+   * @param {GridCoordinates3d} prevCoords
+   * @param {GridCoordinates3d} coords
+   * @returns {MeasuredTemplate[]}
+   */
+    _getTemplatesAtTokenShape(_prevCoords, coords) {
+        if (!this.templates.size)
+            return [];
+        const token = canvas.controls.ruler?.token;
+
+        // Get the center pixel of the destination grid space
+        const centerPt = coords.center;
+
+        let spacesToCheck;
+        if (!token) {
+            spacesToCheck = [centerPt];
+        } else {
+            // Same as _getTerrainHeightToolsAtTokenShape: get all grid cells token occupies
+            const gridPos = canvas.grid.getOffset({ x: centerPt.x, y: centerPt.y });
+            const tokenShape = getTokenShape(token);
+            const area = getAreaFromPositionAndShape({ x: gridPos.j, y: gridPos.i }, tokenShape);
+            spacesToCheck = area.map(space => canvas.grid.getCenterPoint({ j: space.x, i: space.y }));
+        }
+
+        // Use Foundry's exact _getGridHighlightPositions algorithm:
+        // try 9 sample points per cell (center ± 0.5) to handle boundary precision
+        const matched = new Set();
+        for (const pt of spacesToCheck) {
+            for (const t of this.templates) {
+                if (!t.shape)
+                    continue;
+                const ox = t.document.x;
+                const oy = t.document.y;
+                const cx = pt.x;
+                const cy = pt.y;
+                // Origin cell is always covered
+                let covered = Math.max(Math.abs(cx - ox), Math.abs(cy - oy)) < 1;
+                if (!covered) {
+                    outer: for (let dx = -0.5; dx <= 0.5; dx += 0.5) {
+                        for (let dy = -0.5; dy <= 0.5; dy += 0.5) {
+                            if (t.shape.contains(cx - ox + dx, cy - oy + dy)) {
+                                covered = true;
+                                break outer;
+                            }
+                        }
+                    }
+                }
+                if (covered)
+                    matched.add(t);
+            }
+        }
+        return [...matched];
     }
 
     /**
