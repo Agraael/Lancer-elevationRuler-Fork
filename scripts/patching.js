@@ -20,7 +20,7 @@ import { PATCHES as PATCHES_CanvasEdges } from "./pathfinding/CanvasEdges.js";
 import { PATCHES as PATCHES_TokenPF } from "./pathfinding/Token.js";
 
 // Movement tracking
-import { PATCHES as PATCHES_TokenHUD } from "./token_hud.js";
+import { PATCHES as PATCHES_TokenHUD, PATCHES_HISTORY_HUD } from "./token_hud.js";
 import { PATCHES as PATCHES_CombatTracker } from "./CombatTracker.js";
 
 // Settings
@@ -38,7 +38,7 @@ const PATCHES = {
     "foundry.grid.HexagonalGrid": PATCHES_HexagonalGrid,
     "foundry.grid.SquareGrid": PATCHES_SquareGrid,
     "CONFIG.Canvas.rulerClass": PATCHES_Ruler,
-    Token: mergeObject(mergeObject(PATCHES_Token, PATCHES_TokenPF), PATCHES_TokenHUD),
+    Token: mergeObject(mergeObject(mergeObject(PATCHES_Token, PATCHES_TokenPF), PATCHES_TokenHUD), PATCHES_HISTORY_HUD),
     Wall: PATCHES_Wall
 };
 
@@ -58,5 +58,7 @@ export function initializePatching() {
 
     if ( game.system.id !== "dnd5e" )
         PATCHER.registerGroup("MOVEMENT_SELECTION");
+
+    PATCHER.registerGroup("HISTORY_HUD");
 }
 

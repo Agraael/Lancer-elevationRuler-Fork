@@ -294,6 +294,9 @@ export class MovePenalty {
         this.#penaltyCache.clear();
     }
 
+    /** @type {number} Terrain-only penalty for the last movementCostForSegment call (excludes elevation change). */
+    lastTerrainPenalty = 0;
+
 
     // ----- NOTE: Primary methods ----- //
 
@@ -337,6 +340,7 @@ export class MovePenalty {
         if (startCoords.almostEqual(endCoords))
             return costFreeDistance;
 
+        this.lastTerrainPenalty = 0;
         forceGridPenalty ??= Settings.get(Settings.KEYS.MEASURING.FORCE_GRID_PENALTIES);
         forceGridPenalty &&= !canvas.grid.isGridless;
         if (CONFIG[MODULE_ID].debug) {
@@ -349,7 +353,8 @@ export class MovePenalty {
         const endKey = forceGridPenalty ? endCoords.center.key : endCoords.key;
         const key = `${startKey}|${endKey}`;
         if (this.#penaltyCache.has(key)) {
-            const res = this.#penaltyCache.get(key);
+            const { cost: res, terrainPenalty } = this.#penaltyCache.get(key);
+            this.lastTerrainPenalty = terrainPenalty;
             log(`Using key ${key}: ${res}`);
             if (CONFIG[MODULE_ID].debug)
                 console.groupEnd("movementCostForSegment");
@@ -364,7 +369,9 @@ export class MovePenalty {
         && Math.abs(endCoords.j - startCoords.j) < 2
         && Math.abs(endCoords.k - startCoords.k) < 2;
             if (isOneStep) {
-                let baseCost = this.movementCostForGridSpace(startCoords, endCoords, costFreeDistance);
+                const gridCost = this.movementCostForGridSpace(startCoords, endCoords, costFreeDistance);
+                this.lastTerrainPenalty = Math.max(0, gridCost - costFreeDistance);
+                let baseCost = gridCost;
                 if (!canvas.controls.ruler.token?.actor?.statuses.has("flying")) {
                     // Add penalty for terrain elevation change
                     const startTerrainElev = this.getTerrainElevationAt(startCoords);
@@ -382,6 +389,7 @@ export class MovePenalty {
 
             // Unlikely scenario where endCoords are more than 1 step away from startCoords.
             let totalCost = 0;
+            let multiStepTerrainPenalty = 0;
             const path = canvas.grid.getDirectPath([startCoords, endCoords]);
 
 
@@ -399,7 +407,9 @@ export class MovePenalty {
                 const currTerrainElevation = this.getTerrainElevationAt(currOffset);
 
                 // Calculate base cost for the grid space
-                let stepCost = this.movementCostForGridSpace(prevOffset, currOffset, offsetDist) - offsetDist;
+                const gridStepCost = this.movementCostForGridSpace(prevOffset, currOffset, offsetDist);
+                multiStepTerrainPenalty += Math.max(0, gridStepCost - offsetDist);
+                let stepCost = gridStepCost - offsetDist;
 
                 if (!canvas.controls.ruler.token?.actor?.statuses.has("flying")) {
                     // Add penalty for terrain elevation change
@@ -414,13 +424,15 @@ export class MovePenalty {
                 prevTerrainElevation = currTerrainElevation;
             }
 
+            this.lastTerrainPenalty = multiStepTerrainPenalty;
             res = totalCost + costFreeDistance;
         } else {
             // Cost is proportional to the distance of the segment covered by each penalty-imposing token,region,drawing.
             const multiplier = this.proportionalCostForSegment(startCoords, endCoords);
             res = costFreeDistance * multiplier;
+            this.lastTerrainPenalty = Math.max(0, costFreeDistance * (multiplier - 1));
         }
-        this.#penaltyCache.set(key, res);
+        this.#penaltyCache.set(key, { cost: res, terrainPenalty: this.lastTerrainPenalty });
         const t1 = performance.now();
         log(`Found cost ${res} in ${Math.round(t1 - t0)} ms`);
         if (CONFIG[MODULE_ID].debug)

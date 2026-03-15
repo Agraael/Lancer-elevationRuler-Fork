@@ -1,4 +1,5 @@
 /* globals
+canvas,
 CONFIG,
 document,
 game
@@ -34,6 +35,7 @@ SOFTWARE.
 import { MODULE_ID, FLAGS, MOVEMENT_TYPES, MOVEMENT_BUTTONS } from "./const.js";
 import { Settings } from "./settings.js";
 import { keyForValue } from "./util.js";
+import { clearTokenMovementHistory } from "./Token.js";
 
 export const PATCHES = {};
 PATCHES.BASIC = {};
@@ -152,3 +154,27 @@ function createButton(title, id, innerHTML, clickFunction) {
   button.addEventListener("click", clickFunction);
   return button;
 }
+
+// ----- NOTE: Movement History HUD Button ----- //
+
+export const PATCHES_HISTORY_HUD = {};
+PATCHES_HISTORY_HUD.HISTORY_HUD = {};
+
+/**
+ * Hook renderTokenHUD — adds a "Clear Movement History" button when the
+ * history HUD button setting is enabled and combat history tracking is on.
+ */
+function renderTokenHUDHistoryButton(app, html, _data) {
+  if (!Settings.get(Settings.KEYS.MEASURING.COMBAT_HISTORY)) return;
+  if (!Settings.get(Settings.KEYS.HISTORY.HUD_BUTTON)) return;
+  const token = app.object;
+  const button = createButton(
+    "Clear Movement History",
+    "er-clear-movement-history",
+    `<i class="fas fa-shoe-prints fa-fw"></i>`,
+    async () => { await clearTokenMovementHistory(token); }
+  );
+  html.find("div.left").append(button);
+}
+
+PATCHES_HISTORY_HUD.HISTORY_HUD.HOOKS = { renderTokenHUD: renderTokenHUDHistoryButton };

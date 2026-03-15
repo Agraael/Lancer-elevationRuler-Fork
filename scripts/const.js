@@ -17,6 +17,7 @@ export const FLAGS = {
   MOVEMENT_SELECTION: "selectedMovementType",
   MOVEMENT_PENALTY: "movementPenalty",
   MOVEMENT_PENALTY_FLAT: "flatMovementPenalty",
+  PATH_HISTORY: "pathHistory",
   SCENE: {
     BACKGROUND_ELEVATION: "backgroundElevation"
   },

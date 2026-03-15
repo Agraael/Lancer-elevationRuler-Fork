@@ -7,7 +7,7 @@ ui
 */
 "use strict";
 
-import { MODULE_ID, OTHER_MODULES } from "./const.js";
+import { MODULE_ID, OTHER_MODULES, FLAGS } from "./const.js";
 import { ModuleSettingsAbstract } from "./ModuleSettingsAbstract.js";
 import { log } from "./util.js";
 import { SCENE_GRAPH } from "./pathfinding/WallTracer.js";
@@ -89,6 +89,10 @@ const SETTINGS = {
     //   },
 
     TERRAIN_HEIGHT_TOOLS: "terrain-height-tools",
+
+    HISTORY: {
+        HUD_BUTTON: "history-hud-button"
+    }
 };
 
 const KEYBINDINGS = {
@@ -259,6 +263,24 @@ export class Settings extends ModuleSettingsAbstract {
             default: false,
             type: Boolean,
             requiresReload: false
+        });
+
+        register(KEYS.HISTORY.HUD_BUTTON, {
+            name: localize(`${KEYS.HISTORY.HUD_BUTTON}.name`),
+            hint: localize(`${KEYS.HISTORY.HUD_BUTTON}.hint`),
+            scope: "world",
+            config: true,
+            default: true,
+            type: Boolean,
+            requiresReload: false,
+            onChange: async (value) => {
+                if (value) return;
+                // Clearing the HUD button clears all token movement history
+                for (const token of canvas.tokens?.placeables ?? []) {
+                    if (token[MODULE_ID]) token[MODULE_ID].measurementHistory = [];
+                    await token.document.unsetFlag(MODULE_ID, FLAGS.MOVEMENT_HISTORY);
+                }
+            }
         });
 
         if (game.system.id === "dnd5e") {

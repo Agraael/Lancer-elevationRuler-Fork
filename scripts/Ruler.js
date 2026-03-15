@@ -15,7 +15,7 @@ export const PATCHES = {};
 PATCHES.BASIC = {};
 PATCHES.SPEED_HIGHLIGHTING = {};
 
-import { SPEED, MODULE_ID, OTHER_MODULES, MOVEMENT_TYPES } from "./const.js";
+import { SPEED, MODULE_ID, OTHER_MODULES, MOVEMENT_TYPES, FLAGS } from "./const.js";
 import { Settings } from "./settings.js";
 import { Ray3d } from "./geometry/3d/Ray3d.js";
 import {
@@ -538,6 +538,7 @@ function _computeDistance(wrapped) {
 
         segment.distance = distance;
         segment.cost = cost;
+        segment.terrainPenalty = segment.history ? 0 : (this._movePenaltyInstance?._segmentTerrainPenalties?.[i] ?? 0);
         segment.offsetDistance = offsetDistance;
         segment._calculatedPath = measurements[i]._calculatedPath; // Store the real calculated path
         segment.cumulativeDistance = this.totalDistance += distance;
@@ -586,6 +587,12 @@ function _getCostFunction() {
     // Track segment index for accessing cached path data
     let segmentIndex = 0;
 
+    // Per-segment terrain penalty accumulation for lancer-automations
+    const segTerrainPenalties = new Array(this.segments.length).fill(0);
+    movePenaltyInstance._segmentTerrainPenalties = segTerrainPenalties;
+    const segEndOffsets = this.segments.map(s => GridCoordinates3d.fromObject(s.ray.B));
+    let segIdx = 0;
+
     return (prevOffset, currOffset, offsetDistance) => {
         if (!(prevOffset instanceof GridCoordinates3d))
             prevOffset = GridCoordinates3d.fromOffset(prevOffset);
@@ -594,6 +601,15 @@ function _getCostFunction() {
 
         const result = movePenaltyInstance.movementCostForSegment(prevOffset, currOffset, offsetDistance, undefined, segmentIndex);
         segmentIndex++;
+
+        // Accumulate terrain penalty for current ruler segment
+        if (segIdx < segTerrainPenalties.length)
+            segTerrainPenalties[segIdx] += movePenaltyInstance.lastTerrainPenalty ?? 0;
+
+        // Advance segment index when currOffset reaches the segment endpoint
+        const endPt = segEndOffsets[segIdx];
+        if (endPt && currOffset.i === endPt.i && currOffset.j === endPt.j && currOffset.k === endPt.k)
+            segIdx++;
 
         return result;
     };
@@ -829,7 +845,7 @@ function _highlightMeasurementSegment(wrapped, segment) {
  * Add additional controlled tokens to the move, if permitted.
  */
 async function _animateMovement(wrapped, token) {
-    if (!this.segments || !this.segments.length || this.segments.at(-1).distance < 0.5)
+    if (!this.segments || !this.segments.length)
         return wrapped(token); // Ruler._animateMovement expects at least one segment.
 
     if (CONFIG[MODULE_ID].debug) {
@@ -863,6 +879,9 @@ async function _animateMovement(wrapped, token) {
     if (game.combat?.active && Settings.get(Settings.KEYS.MEASURING.COMBAT_HISTORY)) {
         token[MODULE_ID] ??= {};
         token[MODULE_ID].measurementHistory = this._createMeasurementHistory();
+        // Persist to flag for reload restore and cross-client sync.
+        if (token.document.isOwner)
+            token.document.update({ [`flags.${MODULE_ID}.${FLAGS.PATH_HISTORY}`]: token[MODULE_ID].measurementHistory });
     }
 
     return Promise.allSettled(promises);
@@ -992,7 +1011,11 @@ async function _animateSegment(wrapped, token, segment, destination, updateOptio
     foundry.utils.mergeObject(updateOptions, {
         rulerSegment: this.segments.length > 1,
         firstRulerSegment: segment.first,
-        lastRulerSegment: segment.last
+        lastRulerSegment: segment.last,
+        lancerSegmentDistance: Math.round(segment.distance),
+        lancerSegmentCost: Math.round(segment.cost),          // full cost incl. terrain + elevation
+        lancerTerrainPenalty: Math.round(segment.terrainPenalty ?? 0),
+        lancerFreeMovement: segment.freeMovement  // free movement flag
     });
 
     const res = await wrapped(token, segment, destination, updateOptions);

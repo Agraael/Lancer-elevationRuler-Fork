@@ -37,7 +37,7 @@ function preUpdateToken(document, changes, _options, _userId) {
     const token = document.object;
     const noPositionChange = (!("x" in changes) || changes.x === document.x) && (!("y" in changes) || changes.y === document.y) && (!("elevation" in changes) || changes.elevation === document.elevation);
 
-    if (noPositionChange)
+    if (noPositionChange) //  not from the original code , might cause issues
         return;
 
     if (_options.isUndo) {
@@ -105,6 +105,15 @@ function preUpdateToken(document, changes, _options, _userId) {
  */
 function updateToken(document, changed, _options, _userId) {
     const token = document.object;
+
+    // Sync in-memory from flag (cross-client sync + reload restore via flag-only updates).
+    // Flag-only updates have noPositionChange=true and will return below — no double processing.
+    const syncedPath = foundry.utils.getProperty(changed, `flags.${MODULE_ID}.${FLAGS.PATH_HISTORY}`);
+    if (syncedPath !== undefined && token && !document.isOwner) {
+        token[MODULE_ID] ??= {};
+        token[MODULE_ID].measurementHistory = syncedPath;
+    }
+
     const noPositionChange = (!("x" in changed) || changed.x === document.x) && (!("y" in changed) || changed.y === document.y) && (!("elevation" in changed) || changed.elevation === document.elevation);
 
     if (noPositionChange)
@@ -112,8 +121,12 @@ function updateToken(document, changed, _options, _userId) {
 
     if (_options.isUndo) {
         const history = token.elevationruler?.measurementHistory;
-        if (history && history.length >= 1)
+        if (history && history.length >= 1) {
             history.pop();
+            // Persist updated history so other clients and reloads stay in sync.
+            if (token.document.isOwner)
+                token.document.update({ [`flags.${MODULE_ID}.${FLAGS.PATH_HISTORY}`]: [...history] });
+        }
         return;
     }
 
@@ -123,6 +136,8 @@ function updateToken(document, changed, _options, _userId) {
         return;
     if (canvas.controls.ruler.active && canvas.controls.ruler.token === token)
         return; // Ruler movement history stored already.
+    if (_options.firstRulerSegment !== undefined && !document.isOwner)
+        return;
     if (!Settings.get(Settings.KEYS.MEASURING.COMBAT_HISTORY))
         return;
 
@@ -138,6 +153,9 @@ function updateToken(document, changed, _options, _userId) {
     dest.z = gridUnitsToPixels(changed.elevation ?? document.elevation);
     dest.teleport = false;
     tokenHistory.push(origin, dest);
+    // Persist to flag for sync and reload.
+    if (token.document.isOwner)
+        token.document.update({ [`flags.${MODULE_ID}.${FLAGS.PATH_HISTORY}`]: [...tokenHistory] });
 }
 
 // ----- NOTE: Wraps ----- //
@@ -439,6 +457,17 @@ Hooks.on("canvasReady", () => {
     historyPreviewLayer = new PIXI.Container();
     historyPreviewLayer.zIndex = 95;
     canvas.primary.addChild(historyPreviewLayer);
+
+    // Restore in-memory measurement history from flag after reload.
+    if (!game.combat?.active || !Settings.get(Settings.KEYS.MEASURING.COMBAT_HISTORY))
+        return;
+    for (const token of canvas.tokens.placeables) {
+        const saved = token.document.getFlag(MODULE_ID, FLAGS.PATH_HISTORY);
+        if (saved && saved.length) {
+            token[MODULE_ID] ??= {};
+            token[MODULE_ID].measurementHistory = saved;
+        }
+    }
 });
 
 Hooks.on("deleteToken", (_tokenDocument, _options, _userId) => {
@@ -529,6 +558,7 @@ Hooks.on("deleteCombat", async (combat, _options, _userId) => {
             const tokenDoc = combatant.token;
             if (tokenDoc) {
                 await tokenDoc.unsetFlag(MODULE_ID, FLAGS.MOVEMENT_HISTORY);
+                await tokenDoc.unsetFlag(MODULE_ID, FLAGS.PATH_HISTORY);
             }
         }
     }
@@ -654,6 +684,19 @@ function clearHistoryPathSimple() {
     if (historyPreviewLayer) {
         historyPreviewLayer.removeChildren();
     }
+}
+
+/**
+ * Clear all movement history for a token: both the persisted document flag
+ * and the in-memory measurementHistory used by the ruler.
+ * @param {Token} token  The canvas Token object
+ * @returns {Promise<void>}
+ */
+export async function clearTokenMovementHistory(token) {
+    if (token[MODULE_ID]) {
+        token[MODULE_ID].measurementHistory = [];
+    }
+    await token.document.unsetFlag(MODULE_ID, FLAGS.MOVEMENT_HISTORY);
 }
 
 function _onHoverIn(wrapped, event) {

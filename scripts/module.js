@@ -31,6 +31,8 @@ import { benchPathfinding } from "./pathfinding/benchmark.js";
 // Wall updates for pathfinding
 import { SCENE_GRAPH, WallTracer, WallTracerEdge, WallTracerVertex } from "./pathfinding/WallTracer.js";
 
+import { clearTokenMovementHistory } from "./Token.js";
+
 Hooks.once("init", function() {
   registerGeometry();
 
@@ -175,6 +177,8 @@ Hooks.once("init", function() {
     },
 
     WallTracer, WallTracerEdge, WallTracerVertex,
+
+    clearTokenMovementHistory,
 
     Settings
   };
