@@ -110,7 +110,7 @@ export const SPEED = {
    * If true, use Font Awesome font unicode instead of basic unicode for displaying terrain symbol.
    * @type {boolean}
    */
-  useFontAwesome: true, // Set to true to use Font Awesome unicode
+  useFontAwesome: false, // Set to true to use Font Awesome unicode
 
   /**
    * Terrain icon.
@@ -118,7 +118,7 @@ export const SPEED = {
    * If not using Font Awesome, paste in unicode, e.g. "🥾" or "\u0xF0"
    * @type {string}
    */
-  terrainSymbol: "\uf5cd" // https://fontawesome.com/icons/mountain-sun?f=classic&s=solid
+  terrainSymbol: "⚠" // Unicode warning sign, no Font Awesome required
 };
 
 /**

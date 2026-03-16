@@ -373,6 +373,10 @@ function _getMeasurementSegments(wrapped) {
     // No segments are present if dragging back to the origin point.
     const segments = wrapped();
 
+    // If not a token drag ruler, behave like a normal ruler (no elevation/pathfinding).
+    if (!this._isTokenRuler)
+        return segments;
+
     const segmentMap = this._pathfindingSegmentMap ??= new Map();
     if (!segments.length) {
         segmentMap.clear();
@@ -484,6 +488,10 @@ function _getMeasurementSegments(wrapped) {
  */
 function _computeDistance(wrapped) {
     log("_computeDistance");
+
+    // If not a token drag ruler, behave like a normal ruler.
+    if (!this._isTokenRuler)
+        return wrapped();
 
     this._segmentOffsetCache = [];
     // If not this ruler's user, use the segments already calculated and passed via socket.
@@ -623,6 +631,15 @@ function _getCostFunction() {
  * Add elevation information to the label
  */
 function _getSegmentLabel(wrapped, segment) {
+    // If not a token drag ruler, use normal label + THT elevation difference.
+    if (!this._isTokenRuler) {
+        const baseLabel = wrapped(segment);
+        const elevLabel = thtElevationDiffLabel(segment);
+        if (elevLabel)
+            return `${baseLabel}\n${elevLabel}`;
+        return baseLabel;
+    }
+
     if (CONFIG[MODULE_ID].debug) {
         if (this.totalDistance >= 15) {
             console.debug("_getSegmentLabel: 15", segment, this);
@@ -705,6 +722,35 @@ function getTerrainHeightToolsAt(point) {
 }
 
 /**
+ * For a non-token ruler segment, compute the terrain-height elevation difference
+ * between the start and end point using Terrain Height Tools.
+ * Returns a label string like "↑ 10 ft" or "↓ 5 ft", or "" if no difference / THT inactive.
+ * @param {RulerMeasurementSegment} segment
+ * @returns {string}
+ */
+function thtElevationDiffLabel(segment) {
+    if (!segment.last)
+        return "";
+
+    const startTerrains = getTerrainHeightToolsAt(segment.ray.A);
+    const endTerrains = getTerrainHeightToolsAt(segment.ray.B);
+
+    const toElevation = terrains => {
+        if (!terrains.length)
+            return 0;
+        return Math.max(...terrains.map(t => t.terrain.elevation + t.terrain.height));
+    };
+
+    const delta = toElevation(endTerrains) - toElevation(startTerrains);
+    if (Math.abs(delta) < 0.001)
+        return "";
+
+    const arrow = delta > 0 ? "↑" : "↓";
+    const units = canvas.scene.grid.units ? ` ${canvas.scene.grid.units}` : "";
+    return `${arrow} ${Math.abs(delta)}${units}`;
+}
+
+/**
  * Helper function to highlight a segment with token shape
  * Uses the same approach as drag ruler for proper token positioning
  * @param {Ruler} ruler
@@ -763,6 +809,10 @@ function highlightSegmentWithTokenShape(ruler, segment, tokenShape, color) {
 const TOKEN_SPEED_SPLITTER = new WeakMap();
 
 function _highlightMeasurementSegment(wrapped, segment) {
+    // If not a token drag ruler, behave like a normal ruler.
+    if (!this._isTokenRuler)
+        return wrapped(segment);
+
     // Temporarily override cached ray.distance such that the ray distance is two-dimensional,
     // so highlighting selects correct squares.
     // Otherwise the highlighting algorithm can get confused for high-elevation segments.
