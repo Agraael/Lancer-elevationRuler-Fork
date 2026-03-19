@@ -109,9 +109,15 @@ function updateToken(document, changed, _options, _userId) {
     // Sync in-memory from flag (cross-client sync + reload restore via flag-only updates).
     // Flag-only updates have noPositionChange=true and will return below — no double processing.
     const syncedPath = foundry.utils.getProperty(changed, `flags.${MODULE_ID}.${FLAGS.PATH_HISTORY}`);
-    if (syncedPath !== undefined && token && !document.isOwner) {
-        token[MODULE_ID] ??= {};
-        token[MODULE_ID].measurementHistory = syncedPath;
+    const pathCleared = foundry.utils.getProperty(changed, `flags.${MODULE_ID}.-=${FLAGS.PATH_HISTORY}`) !== undefined;
+    if (token && !document.isOwner) {
+        if (syncedPath !== undefined) {
+            token[MODULE_ID] ??= {};
+            token[MODULE_ID].measurementHistory = syncedPath;
+        } else if (pathCleared) {
+            token[MODULE_ID] ??= {};
+            token[MODULE_ID].measurementHistory = [];
+        }
     }
 
     const noPositionChange = (!("x" in changed) || changed.x === document.x) && (!("y" in changed) || changed.y === document.y) && (!("elevation" in changed) || changed.elevation === document.elevation);
@@ -697,6 +703,7 @@ export async function clearTokenMovementHistory(token) {
         token[MODULE_ID].measurementHistory = [];
     }
     await token.document.unsetFlag(MODULE_ID, FLAGS.MOVEMENT_HISTORY);
+    await token.document.unsetFlag(MODULE_ID, FLAGS.PATH_HISTORY);
 }
 
 function _onHoverIn(wrapped, event) {
