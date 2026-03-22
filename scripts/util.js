@@ -245,7 +245,7 @@ export function * iterateGridUnderLine(origin, destination, { reverse = false } 
 
     // Skip the first one
     // If the positions are not neighbors, also highlight their halfway point
-    if ( prior && !canvas.grid.isNeighbor(r0, c0, r1, c1) ) {
+    if ( prior && !canvas.grid.testAdjacency({ i: r0, j: c0 }, { i: r1, j: c1 }) ) {
       const th = (t + tPrior) * 0.5;
       const {x: xh, y: yh} = origin.projectToward(destination, th);
       const hOffset = canvas.grid.getOffset({ x: xh, y: yh });
@@ -399,7 +399,7 @@ export function getTokenShape(token) {
   }
 
   // Handle columnar vs row-based hex grids
-  if (canvas.grid.grid.columnar) {
+  if (canvas.grid.columns) {
     shape = shape.map(space => {
       return {x: space.y, y: space.x};
     });
@@ -428,7 +428,7 @@ export function getAreaFromPositionAndShape(position, shape) {
       if (canvas.grid?.even) shiftedRow = 1;
       else shiftedRow = 0;
 
-      if (canvas.grid.grid.columnar) {
+      if (canvas.grid.columns) {
         // Columnar hex grid (vertical columns)
         // Check if space has odd x-offset AND base position needs shifting
         if (space.x % 2 !== 0 && position.x % 2 !== shiftedRow) {

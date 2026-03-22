@@ -626,7 +626,7 @@ function drawHistoryPathSimple(token) {
     const offset = { x: 0, y: 0 };
     if (canvas.grid.isHexagonal && tokenShape) {
         const size = token.document.width;
-        if (canvas.grid.grid.columnar) {
+        if (canvas.grid.columns) {
             if (size % 2 === 0) {
                 offset.x = canvas.grid.sizeX / 2;
             }

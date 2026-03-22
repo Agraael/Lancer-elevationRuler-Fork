@@ -765,7 +765,7 @@ function highlightSegmentWithTokenShape(ruler, segment, tokenShape, color) {
 
     if (token && canvas.grid.isHexagonal) {
         const size = token.document.width;
-        if (canvas.grid.grid.columnar) {
+        if (canvas.grid.columns) {
             if (size % 2 === 0) {
                 offset.x = canvas.grid.sizeX / 2;
             }
@@ -792,7 +792,7 @@ function highlightSegmentWithTokenShape(ruler, segment, tokenShape, color) {
         const area = getAreaFromPositionAndShape({ x: offset.j, y: offset.i }, tokenShape);
         for (const space of area) {
             const pixelPos = canvas.grid.getTopLeftPoint({ j: space.x, i: space.y });
-            canvas.grid.highlightGridPosition(ruler.highlightLayer, {
+            canvas.interface.grid.highlightPosition(ruler.name, {
                 x: pixelPos.x,
                 y: pixelPos.y,
                 color: color,
