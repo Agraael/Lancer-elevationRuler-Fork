@@ -32,6 +32,7 @@ import { benchPathfinding } from "./pathfinding/benchmark.js";
 import { SCENE_GRAPH, WallTracer, WallTracerEdge, WallTracerVertex } from "./pathfinding/WallTracer.js";
 
 import { clearTokenMovementHistory } from "./Token.js";
+import { THTElevationAtPoint } from "./terrain_elevation.js";
 
 Hooks.once("init", function() {
   registerGeometry();
@@ -198,6 +199,23 @@ Hooks.once("setup", function() {
 // Initialize compatibility fixes once the game is ready
 Hooks.once("ready", function() {
   initTokenAnimationToolsCompat();
+});
+
+// When a token is created on THT terrain, set its initial elevation.
+// This replaces THT's handleTokenPreCreation so THT auto-elevation can be disabled.
+Hooks.on("preCreateToken", (tokenDoc, _createData, _options, userId) => {
+  if (game.user.id !== userId) return;
+  if (!Settings.get(Settings.KEYS.TERRAIN_HEIGHT_TOOLS)) return;
+  if (tokenDoc.getFlag("terrain-height-tools", "ignoreAutoElevation")) return;
+
+  // tokenDoc.x/y is top-left corner — convert to center for correct hex lookup.
+  const centerX = tokenDoc.x + (canvas.grid.sizeX ?? canvas.grid.size) * (tokenDoc.width ?? 1) / 2;
+  const centerY = tokenDoc.y + (canvas.grid.sizeY ?? canvas.grid.size) * (tokenDoc.height ?? 1) / 2;
+  const terrainElev = THTElevationAtPoint({ x: centerX, y: centerY }) ?? 0;
+  if (terrainElev > 0) {
+    const sceneDistance = canvas.scene.dimensions?.distance ?? 1;
+    tokenDoc.updateSource({ elevation: terrainElev * sceneDistance });
+  }
 });
 
 // For https://github.com/League-of-Foundry-Developers/foundryvtt-devMode

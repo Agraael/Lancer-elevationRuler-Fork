@@ -174,8 +174,23 @@ export function elevationFromWaypoint(waypoint, location, token) {
     else if ( dist > 5 ) console.debug(`elevationFromWaypoint ${dist}`);
   }
 
+  // For non-flying token rulers: if the token is on (or near) the terrain surface,
+  // follow the terrain at the destination and maintain the height offset above it.
+  // This ensures a token at terrain 3 + manual offset 1 (= 4) drops to terrain 0 + offset 1 (= 1)
+  // when moving to flat ground, instead of staying at 4.
+  // Use a clean {x,y} point so the fallback doesn't return waypoint.elevation as "terrain".
+  const waypointTerrainE = terrainElevationAtLocation({ x: waypoint.x, y: waypoint.y }, waypoint.elevation);
+  const offsetAboveTerrain = waypoint.elevation - waypointTerrainE;
+  const gridDistance = canvas.scene.grid.distance;
+  const isOnTerrainSurface = isTokenRuler
+    && offsetAboveTerrain >= 0 && offsetAboveTerrain <= gridDistance;
+
   let locationElevation;
-  if ( !isTokenRuler ) {
+  if ( isOnTerrainSurface ) {
+    // Non-flying token on terrain surface: follow terrain, preserve offset above ground.
+    const destTerrainE = terrainElevationAtLocation(location, waypoint.elevation);
+    locationElevation = destTerrainE + offsetAboveTerrain;
+  } else if ( !isTokenRuler ) {
     let maxTokenE;
     const terrainE = terrainElevationAtLocation(location, waypoint.elevation);
 
@@ -190,11 +205,12 @@ export function elevationFromWaypoint(waypoint, location, token) {
     else locationElevation = elevationAtLocation(location, {
       startE: waypoint.elevation,
       forceToGround: Settings.FORCE_TO_GROUND
-        || waypoint.elevation.almostEqual(terrainElevationAtLocation(waypoint, waypoint.elevation))
+        || waypoint.elevation.almostEqual(waypointTerrainE)
     });
   } else locationElevation = tokenElevationForMovement(waypoint, location, {
     token,
     forceToGround: Settings.FORCE_TO_GROUND
+      || waypoint.elevation.almostEqual(waypointTerrainE)
   });
   return locationElevation + userElevationChangeAtWaypoint(waypoint);
 }
@@ -261,6 +277,9 @@ export function terrainElevationAtLocation(location, startingElevation = 0) {
   // For now, take the first one that is present.
   const tmRes = TMElevationAtPoint(location, startingElevation);
   if ( isFinite(tmRes) ) return tmRes;
+
+  const thtRes = THTElevationAtPoint(location, startingElevation);
+  if ( thtRes !== null && isFinite(thtRes) ) return thtRes;
 
   const levelsRes = LevelsElevationAtPoint(location, startingElevation);
   if ( levelsRes !== null && isFinite(levelsRes) ) return levelsRes;
@@ -346,6 +365,38 @@ function TMPathForMovement(start, end, opts) {
   const api = OTHER_MODULES.TERRAIN_MAPPER.API;
   if ( !api || !api.ElevationHandler ) return [start, end];
   return api.ElevationHandler.constructPath(start, end, opts);
+}
+
+// ----- NOTE: Terrain Height Tools Elevation ----- //
+
+/**
+ * Measure the terrain elevation at a given point using Terrain Height Tools.
+ * Returns the top of the highest terrain at the location (elevation + height).
+ * @param {Point} location                    Point to measure, in {x, y} format
+ * @param {number} [startingElevation=0]      Starting elevation for filtering
+ * @returns {number|null} Elevation in grid units, or null if THT inactive or no terrain at location.
+ */
+export function THTElevationAtPoint(location, startingElevation = 0) {
+  if ( !Settings.get(Settings.KEYS.TERRAIN_HEIGHT_TOOLS) ) return null;
+  const tht = OTHER_MODULES.TERRAIN_HEIGHT_TOOLS;
+  if ( !tht.ACTIVE || !tht.API ) return null;
+
+  const gridPos = canvas.grid.getOffset({ x: location.x, y: location.y });
+  const cellData = tht.API.getCell(gridPos.j, gridPos.i);
+  if ( !cellData || !cellData.length ) return null;
+
+  // Get terrain type configs to filter by usesHeight && isSolid (matching THT's own logic).
+  const terrainTypes = tht.getTerrainTypes?.() || [];
+
+  // Return the top of the highest solid, height-using terrain at this cell.
+  let maxElevation = null;
+  for ( const terrain of cellData ) {
+    const terrainType = terrainTypes.find(t => t.id === terrain.terrainTypeId);
+    if ( !terrainType?.usesHeight || !terrainType?.isSolid ) continue;
+    const top = terrain.elevation + terrain.height;
+    if ( maxElevation === null || top > maxElevation ) maxElevation = top;
+  }
+  return maxElevation;
 }
 
 // ----- NOTE: LEVELS ELEVATION ----- //

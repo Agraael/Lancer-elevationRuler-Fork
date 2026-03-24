@@ -8,6 +8,7 @@ game
 
 import { Settings } from "../settings.js";
 import { log } from "../util.js";
+import { THTElevationAtPoint } from "../terrain_elevation.js";
 
 /**
  * Modify Grid classes to measure in 3d.
@@ -112,10 +113,23 @@ function _measurePath(wrapped, waypoints, { cost }, result) {
     segment.spaces = path3d.length - 1;
     segment._calculatedPath = path3d; // Store the actual path used for calculations
     
+    const isFlying = !!canvas.controls.ruler.token?.actor?.statuses.has("flying");
     let verticalCost = 0;
-    if ( !canvas.controls.ruler.token?.actor?.statuses.has("flying") ) {
+    {
       const dz = Math.abs(end.z - start.z);
-      verticalCost = CONFIG.GeometryLib.utils.pixelsToGridUnits(dz);
+      const manualElev = CONFIG.GeometryLib.utils.pixelsToGridUnits(dz);
+      if ( isFlying ) {
+        // Flying: each elevation unit costs 1 (no malus). Total = H + N.
+        // Bresenham gives max(H, N) per-step. verticalCost = min(H, N) to compensate.
+        const path2d = canvas.grid.getDirectPath([
+          { ...canvas.grid.getCenterPoint(canvas.grid.getOffset(start)), z: 0 },
+          { ...canvas.grid.getCenterPoint(canvas.grid.getOffset(end)), z: 0 }
+        ]);
+        const hDist = Math.max(0, path2d.length - 1);
+        verticalCost = Math.min(hDist, manualElev);
+      } else {
+        verticalCost = manualElev;
+      }
     }
 
     let prevPathPt = GridCoordinates3d.fromObject({ ...path3d[0], z: 0 }); // Path points are GridCoordinates3d.
@@ -130,7 +144,55 @@ function _measurePath(wrapped, waypoints, { cost }, result) {
       prevPathPt = currPathPt;
     }
     segment.diagonals = offsetDistanceFn.diagonals - prevDiagonals;
-    segment.cost += verticalCost; // Add double the vertical distance to the cost
+
+    // Same hex, no movement: force cost to 0 (Foundry may produce a phantom 1).
+    const startOffset = canvas.grid.getOffset(start);
+    const endOffset = canvas.grid.getOffset(end);
+    const sameHex = startOffset.i === endOffset.i && startOffset.j === endOffset.j;
+    if ( sameHex && verticalCost === 0 && start.z === end.z ) {
+      segment.cost = 0;
+      segment.distance = 0;
+      segment.offsetDistance = 0;
+    }
+
+    // Adjust verticalCost when both manual [/] and THT terrain elevation exist.
+    if ( verticalCost > 0 ) {
+      const thtStart = THTElevationAtPoint(start) ?? 0;
+      const thtEnd = THTElevationAtPoint(end) ?? 0;
+      const thtChange = thtEnd - thtStart;
+      const manualChange = CONFIG.GeometryLib.utils.pixelsToGridUnits(end.z - start.z);
+      const manualElev = Math.abs(manualChange);
+
+      // Track manual climbing malus for label display (first elevation unit is free).
+      let manualMalus = isFlying ? 0 : Math.max(0, manualElev - 1);
+
+      if ( thtChange !== 0 ) {
+        const absTht = Math.abs(thtChange);
+        const absManual = Math.abs(manualChange);
+        const sameDir = Math.sign(thtChange) === Math.sign(manualChange);
+
+        // MovePenalty charge: with malus N+(N-1), or without malus just N.
+        const malusFn = (n) => isFlying ? n : n + Math.max(0, n - 1);
+
+        if ( sameDir ) {
+          // Same direction: bridge the double "first unit" discount (normal only).
+          if ( !isFlying ) {
+            verticalCost += 1;
+            manualMalus += 1; // Bridge malus: both manual + THT share one "first unit free"
+          }
+        } else {
+          // Opposite directions: manual cancels some THT.
+          const cancelled = Math.min(absTht, absManual);
+          const remaining = absTht - cancelled;
+          verticalCost -= cancelled + (malusFn(absTht) - malusFn(remaining));
+        }
+      }
+
+      // Pure vertical movement (same hex): remove phantom horizontal from bresenham.
+      if ( sameHex ) segment.cost -= 1;
+      segment.manualClimbingMalus = manualMalus;
+    }
+    segment.cost += verticalCost;
 
     // Accumulate the waypoint totals
     const resultStartWaypoint = result.waypoints[i - 1];

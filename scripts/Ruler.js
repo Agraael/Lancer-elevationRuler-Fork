@@ -373,8 +373,8 @@ function _getMeasurementSegments(wrapped) {
     // No segments are present if dragging back to the origin point.
     const segments = wrapped();
 
-    // If not a token drag ruler, behave like a normal ruler (no elevation/pathfinding).
-    if (!this._isTokenRuler)
+    // If not a token drag ruler and simplified canvas ruler is enabled, behave like a normal ruler.
+    if (!this._isTokenRuler && Settings.get(Settings.KEYS.TOKEN_RULER.SIMPLE_CANVAS_RULER))
         return segments;
 
     const segmentMap = this._pathfindingSegmentMap ??= new Map();
@@ -489,8 +489,8 @@ function _getMeasurementSegments(wrapped) {
 function _computeDistance(wrapped) {
     log("_computeDistance");
 
-    // If not a token drag ruler, behave like a normal ruler.
-    if (!this._isTokenRuler)
+    // If not a token drag ruler and simplified canvas ruler is enabled, behave like a normal ruler.
+    if (!this._isTokenRuler && Settings.get(Settings.KEYS.TOKEN_RULER.SIMPLE_CANVAS_RULER))
         return wrapped();
 
     this._segmentOffsetCache = [];
@@ -501,13 +501,22 @@ function _computeDistance(wrapped) {
     // Unfortunately, need to redo the measurement.
     // Primarily b/c the cost and labeling needs the offsetDistance from the measurement.
     // Add in the 3d points.
+    // Build cost path with manual-only z-values.
+    // Full z includes THT terrain (for _animateSegment to set token elevation),
+    // but cost should only reflect manual [/] elevation. THT cost is handled by MovePenalty per-step.
+    // Strip terrain using terrainElevationAtLocation (same function that computed waypoint elevation).
     const Point3d = CONFIG.GeometryLib.threeD.Point3d;
+    const gridUnitsToPixels = CONFIG.GeometryLib.utils.gridUnitsToPixels;
     let path = [];
-    if (this.segments.length)
-        path.push(Point3d.fromObject(this.segments[0].ray.A));
+    if (this.segments.length) {
+        const A = Point3d.fromObject(this.segments[0].ray.A);
+        A.z -= gridUnitsToPixels(terrainElevationAtLocation(this.segments[0].ray.A, 0));
+        path.push(A);
+    }
     for (const segment of this.segments) {
         const B = Point3d.fromObject(segment.ray.B);
         B.teleport = segment.teleport;
+        B.z -= gridUnitsToPixels(terrainElevationAtLocation(segment.ray.B, 0));
         path.push(B);
     }
 
@@ -536,6 +545,8 @@ function _computeDistance(wrapped) {
     let waypointDistance = 0;
     let waypointCost = 0;
     let waypointOffsetDistance = 0;
+    let waypointClimbingMalus = 0;
+    let waypointTerrainPenalty = 0;
     let currWaypointIdx = -1;
 
     for (let i = 0; i < this.segments.length; i++) {
@@ -547,6 +558,9 @@ function _computeDistance(wrapped) {
         segment.distance = distance;
         segment.cost = cost;
         segment.terrainPenalty = segment.history ? 0 : (this._movePenaltyInstance?._segmentTerrainPenalties?.[i] ?? 0);
+        segment.climbingMalus = segment.history ? 0
+            : (this._movePenaltyInstance?._segmentClimbingMalus?.[i] ?? 0)
+              + (measurements[i].manualClimbingMalus ?? 0);
         segment.offsetDistance = offsetDistance;
         segment._calculatedPath = measurements[i]._calculatedPath; // Store the real calculated path
         segment.cumulativeDistance = this.totalDistance += distance;
@@ -562,10 +576,14 @@ function _computeDistance(wrapped) {
             waypointDistance = 0;
             waypointCost = 0;
             waypointOffsetDistance = 0;
+            waypointClimbingMalus = 0;
+            waypointTerrainPenalty = 0;
         }
         segment.waypoint.distance = waypointDistance += segment.distance;
         segment.waypoint.cost = waypointCost += segment.cost;
         segment.waypoint.offsetDistance = waypointOffsetDistance += segment.offsetDistance;
+        segment.waypoint.climbingMalus = waypointClimbingMalus += segment.climbingMalus;
+        segment.waypoint.terrainPenalty = waypointTerrainPenalty += segment.terrainPenalty;
         if (~currWaypointIdx) {
             segment.waypoint.elevationIncrement = userElevationChangeAtWaypoint(this.waypoints[currWaypointIdx]);
         }
@@ -577,8 +595,40 @@ function _computeDistance(wrapped) {
  * Return the movement penalty calculator.
  */
 function _getCostFunction() {
-    if (!this.token)
-        return undefined;
+    if (!this.token) {
+        // Canvas ruler (no token): use a simple cost function that handles THT elevation per-step.
+        // Same logic as MovePenalty.getTerrainElevationAt + climbing malus.
+        const tht = OTHER_MODULES.TERRAIN_HEIGHT_TOOLS;
+        if (!tht?.ACTIVE || !tht?.API) return undefined;
+        const terrainTypes = tht.getTerrainTypes?.() || [];
+        if (!terrainTypes.length) return undefined;
+
+        const getElevAt = (coords) => {
+            const pt = coords.center ?? coords;
+            const gridPos = canvas.grid.getOffset({ x: pt.x, y: pt.y });
+            const cellData = tht.API.getCell(gridPos.j, gridPos.i);
+            if (!cellData?.length) return 0;
+            let max = 0;
+            for (const terrain of cellData) {
+                const tt = terrainTypes.find(t => t.id === terrain.terrainTypeId);
+                if (tt?.usesHeight && tt?.isSolid)
+                    max = Math.max(max, terrain.elevation + terrain.height);
+            }
+            return max;
+        };
+
+        let prevElev = null;
+        return (prevOffset, currOffset, offsetDistance) => {
+            const currElev = getElevAt(currOffset);
+            if (prevElev === null) prevElev = getElevAt(prevOffset);
+            let cost = offsetDistance;
+            const elevChange = Math.floor(Math.abs(currElev - prevElev));
+            if (elevChange > 0)
+                cost += elevChange + (elevChange - 1);
+            prevElev = currElev;
+            return cost;
+        };
+    }
 
     // Construct a move penalty instance that covers all the segments.
     const movePenaltyInstance = this._movePenaltyInstance ??= new MovePenalty(this.token);
@@ -598,6 +648,9 @@ function _getCostFunction() {
     // Per-segment terrain penalty accumulation for lancer-automations
     const segTerrainPenalties = new Array(this.segments.length).fill(0);
     movePenaltyInstance._segmentTerrainPenalties = segTerrainPenalties;
+    // Per-segment climbing malus accumulation (extra cost beyond first elevation unit)
+    const segClimbingMalus = new Array(this.segments.length).fill(0);
+    movePenaltyInstance._segmentClimbingMalus = segClimbingMalus;
     const segEndOffsets = this.segments.map(s => GridCoordinates3d.fromObject(s.ray.B));
     let segIdx = 0;
 
@@ -610,9 +663,11 @@ function _getCostFunction() {
         const result = movePenaltyInstance.movementCostForSegment(prevOffset, currOffset, offsetDistance, undefined, segmentIndex);
         segmentIndex++;
 
-        // Accumulate terrain penalty for current ruler segment
-        if (segIdx < segTerrainPenalties.length)
+        // Accumulate terrain penalty and climbing malus for current ruler segment
+        if (segIdx < segTerrainPenalties.length) {
             segTerrainPenalties[segIdx] += movePenaltyInstance.lastTerrainPenalty ?? 0;
+            segClimbingMalus[segIdx] += movePenaltyInstance.lastClimbingMalus ?? 0;
+        }
 
         // Advance segment index when currOffset reaches the segment endpoint
         const endPt = segEndOffsets[segIdx];
@@ -631,8 +686,8 @@ function _getCostFunction() {
  * Add elevation information to the label
  */
 function _getSegmentLabel(wrapped, segment) {
-    // If not a token drag ruler, use normal label + THT elevation difference.
-    if (!this._isTokenRuler) {
+    // If not a token drag ruler and simplified canvas ruler is enabled, use normal label + THT elevation difference.
+    if (!this._isTokenRuler && Settings.get(Settings.KEYS.TOKEN_RULER.SIMPLE_CANVAS_RULER)) {
         const baseLabel = wrapped(segment);
         const elevLabel = thtElevationDiffLabel(segment);
         if (elevLabel)
@@ -809,8 +864,8 @@ function highlightSegmentWithTokenShape(ruler, segment, tokenShape, color) {
 const TOKEN_SPEED_SPLITTER = new WeakMap();
 
 function _highlightMeasurementSegment(wrapped, segment) {
-    // If not a token drag ruler, behave like a normal ruler.
-    if (!this._isTokenRuler)
+    // If not a token drag ruler and simplified canvas ruler is enabled, behave like a normal ruler.
+    if (!this._isTokenRuler && Settings.get(Settings.KEYS.TOKEN_RULER.SIMPLE_CANVAS_RULER))
         return wrapped(segment);
 
     // Temporarily override cached ray.distance such that the ray distance is two-dimensional,
@@ -1049,7 +1104,8 @@ function _canMove(wrapper, token) {
  */
 async function _animateSegment(wrapped, token, segment, destination, updateOptions = {}) {
     log(`Updating ${token.name} destination from ({${token.document.x},${token.document.y}) to (${destination.x},${destination.y}) for segment (${segment.ray.A.x},${segment.ray.A.y})|(${segment.ray.B.x},${segment.ray.B.y})`);
-    destination.elevation = roundMultiple(CONFIG.GeometryLib.utils.pixelsToGridUnits(segment.ray.B.z));
+    const segElevation = roundMultiple(CONFIG.GeometryLib.utils.pixelsToGridUnits(segment.ray.B.z));
+    destination.elevation = Number.isFinite(segElevation) ? segElevation : (token.document.elevation ?? 0);
 
     // If moving multiple tokens, take into account the current token's elevation differential.
     const origE = this.waypoints[0].elevation || 0;

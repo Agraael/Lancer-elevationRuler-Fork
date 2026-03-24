@@ -46,6 +46,19 @@ Hooks.once("ready", function() {
   const tht = OTHER_MODULES.TERRAIN_HEIGHT_TOOLS;
   if ( tht.ACTIVE ) {
     tht.API = globalThis.terrainHeightTools;
+
+    // Warn if THT's auto-elevation is enabled — this version of Elevation Ruler handles terrain elevation itself.
+    try {
+      if ( game.settings.get(tht.KEY, "tokenElevationChange") ) {
+        ui.notifications.warn(
+          "Elevation Ruler: Terrain Height Tools' 'Automatic Token Elevation Change' is enabled. "
+          + "This version of Elevation Ruler handles terrain-based elevation automatically. "
+          + "Please disable THT's auto-elevation in its settings to avoid conflicts.",
+          { permanent: true }
+        );
+      }
+    } catch(e) { /* Setting may not exist in older THT versions */ }
+
     tht.getTerrainTypes = () => {
       const terrainTypes = game.settings.get(tht.KEY, "terrainTypes") || [];
       const defaultTerrain = {

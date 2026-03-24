@@ -297,6 +297,9 @@ export class MovePenalty {
     /** @type {number} Terrain-only penalty for the last movementCostForSegment call (excludes elevation change). */
     lastTerrainPenalty = 0;
 
+    /** @type {number} Climbing malus for the last movementCostForSegment call (extra cost beyond first elevation unit). */
+    lastClimbingMalus = 0;
+
 
     // ----- NOTE: Primary methods ----- //
 
@@ -341,6 +344,7 @@ export class MovePenalty {
             return costFreeDistance;
 
         this.lastTerrainPenalty = 0;
+        this.lastClimbingMalus = 0;
         forceGridPenalty ??= Settings.get(Settings.KEYS.MEASURING.FORCE_GRID_PENALTIES);
         forceGridPenalty &&= !canvas.grid.isGridless;
         if (CONFIG[MODULE_ID].debug) {
@@ -353,8 +357,9 @@ export class MovePenalty {
         const endKey = forceGridPenalty ? endCoords.center.key : endCoords.key;
         const key = `${startKey}|${endKey}`;
         if (this.#penaltyCache.has(key)) {
-            const { cost: res, terrainPenalty } = this.#penaltyCache.get(key);
+            const { cost: res, terrainPenalty, climbingMalus } = this.#penaltyCache.get(key);
             this.lastTerrainPenalty = terrainPenalty;
+            this.lastClimbingMalus = climbingMalus ?? 0;
             log(`Using key ${key}: ${res}`);
             if (CONFIG[MODULE_ID].debug)
                 console.groupEnd("movementCostForSegment");
@@ -372,16 +377,23 @@ export class MovePenalty {
                 const gridCost = this.movementCostForGridSpace(startCoords, endCoords, costFreeDistance);
                 this.lastTerrainPenalty = Math.max(0, gridCost - costFreeDistance);
                 let baseCost = gridCost;
-                if (!canvas.controls.ruler.token?.actor?.statuses.has("flying")) {
-                    // Add penalty for terrain elevation change
+                {
+                    // Add penalty for terrain elevation change.
+                    // Normal: first unit costs 1, each additional costs 2 (climbing malus).
+                    // Flying/climber (_noClimbingMalus): each unit costs 1.
                     const startTerrainElev = this.getTerrainElevationAt(startCoords);
                     const endTerrainElev = this.getTerrainElevationAt(endCoords);
                     if (startTerrainElev !== null && endTerrainElev !== null) {
-                        const elevationChange = Math.abs(endTerrainElev - startTerrainElev);
-                        baseCost += Math.floor(elevationChange);
+                        const elevationChange = Math.floor(Math.abs(endTerrainElev - startTerrainElev));
+                        if (elevationChange > 0) {
+                            const malus = this._noClimbingMalus ? 0 : (elevationChange - 1);
+                            baseCost += elevationChange + malus;
+                            this.lastClimbingMalus = malus;
+                        }
                     }
                 }
 
+                this.#penaltyCache.set(key, { cost: baseCost, terrainPenalty: this.lastTerrainPenalty, climbingMalus: this.lastClimbingMalus });
                 if (CONFIG[MODULE_ID].debug)
                     console.groupEnd("movementCostForSegment");
                 return baseCost;
@@ -390,6 +402,7 @@ export class MovePenalty {
             // Unlikely scenario where endCoords are more than 1 step away from startCoords.
             let totalCost = 0;
             let multiStepTerrainPenalty = 0;
+            let multiStepClimbingMalus = 0;
             const path = canvas.grid.getDirectPath([startCoords, endCoords]);
 
 
@@ -411,11 +424,15 @@ export class MovePenalty {
                 multiStepTerrainPenalty += Math.max(0, gridStepCost - offsetDist);
                 let stepCost = gridStepCost - offsetDist;
 
-                if (!canvas.controls.ruler.token?.actor?.statuses.has("flying")) {
-                    // Add penalty for terrain elevation change
+                {
+                    // Normal: climbing malus. Flying/climber (_noClimbingMalus): each unit costs 1.
                     if (prevTerrainElevation !== null && currTerrainElevation !== null) {
-                        const elevationChange = Math.abs(currTerrainElevation - prevTerrainElevation);
-                        stepCost += Math.floor(elevationChange);
+                        const elevationChange = Math.floor(Math.abs(currTerrainElevation - prevTerrainElevation));
+                        if (elevationChange > 0) {
+                            const malus = this._noClimbingMalus ? 0 : (elevationChange - 1);
+                            stepCost += elevationChange + malus;
+                            multiStepClimbingMalus += malus;
+                        }
                     }
                 }
 
@@ -425,6 +442,7 @@ export class MovePenalty {
             }
 
             this.lastTerrainPenalty = multiStepTerrainPenalty;
+            this.lastClimbingMalus = multiStepClimbingMalus;
             res = totalCost + costFreeDistance;
         } else {
             // Cost is proportional to the distance of the segment covered by each penalty-imposing token,region,drawing.
@@ -432,7 +450,7 @@ export class MovePenalty {
             res = costFreeDistance * multiplier;
             this.lastTerrainPenalty = Math.max(0, costFreeDistance * (multiplier - 1));
         }
-        this.#penaltyCache.set(key, { cost: res, terrainPenalty: this.lastTerrainPenalty });
+        this.#penaltyCache.set(key, { cost: res, terrainPenalty: this.lastTerrainPenalty, climbingMalus: this.lastClimbingMalus });
         const t1 = performance.now();
         log(`Found cost ${res} in ${Math.round(t1 - t0)} ms`);
         if (CONFIG[MODULE_ID].debug)
@@ -710,10 +728,10 @@ export class MovePenalty {
         if (terrains.length === 0)
             return 0;
 
-        // Return the highest terrain top (elevation + height) only for terrains that block movement
+        // Return the highest terrain top (elevation + height) for solid, height-using terrains
+        // (matching THT's own getHighestTerrainUnderToken logic).
         return terrains.reduce((max, { terrain, type }) => {
-            // Only consider terrain if it blocks movement
-            if (type.blockMovement) {
+            if (type.usesHeight && type.isSolid) {
                 return Math.max(max, terrain.elevation + terrain.height);
             }
             return max;

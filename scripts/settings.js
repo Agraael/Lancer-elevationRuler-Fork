@@ -64,7 +64,7 @@ const SETTINGS = {
     TOKEN_RULER: {
         ENABLED: "enable-token-ruler",
         HIDE_GM: "hide-gm-ruler",
-
+        SIMPLE_CANVAS_RULER: "simple-canvas-ruler"
     },
 
     SPEED_HIGHLIGHTING: {
@@ -219,6 +219,16 @@ export class Settings extends ModuleSettingsAbstract {
             name: localize(`${KEYS.TOKEN_RULER.HIDE_GM}.name`),
             hint: localize(`${KEYS.TOKEN_RULER.HIDE_GM}.hint`),
             scope: "world",
+            config: true,
+            default: false,
+            type: Boolean,
+            requiresReload: false
+        });
+
+        register(KEYS.TOKEN_RULER.SIMPLE_CANVAS_RULER, {
+            name: localize(`${KEYS.TOKEN_RULER.SIMPLE_CANVAS_RULER}.name`),
+            hint: localize(`${KEYS.TOKEN_RULER.SIMPLE_CANVAS_RULER}.hint`),
+            scope: "user",
             config: true,
             default: false,
             type: Boolean,

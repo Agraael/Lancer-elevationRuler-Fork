@@ -33,6 +33,8 @@
     "elevationruler.settings.hide-elevation-ruler.hint": "Hide the Elevation from the Label when using a Ruler.",
     "elevationruler.settings.hide-gm-ruler.name": "Hide GM Token Ruler",
     "elevationruler.settings.hide-gm-ruler.hint": "Do not display the GM's token ruler for other non-GM users.",
+    "elevationruler.settings.simple-canvas-ruler.name": "Simplified Canvas Ruler",
+    "elevationruler.settings.simple-canvas-ruler.hint": "When enabled, the canvas ruler (ctrl+drag, not from a token) uses vanilla Foundry labels and highlighting instead of the enhanced elevation ruler features.",
     "elevationruler.settings.speed-highlighting-choice.name": "Use Token Speed Highlighting",
     "elevationruler.settings.speed-highlighting-choice.hint": "When using the ruler, use different colors for token walk/dash/max distance.",
     "elevationruler.settings.speed-highlighting-choice-never": "Never",

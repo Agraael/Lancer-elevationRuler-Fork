@@ -10,6 +10,7 @@ PreciseText
 import { MODULE_ID, OTHER_MODULES } from "./const.js";
 import { Settings } from "./settings.js";
 import { perpendicularPoints, roundMultiple } from "./util.js";
+import { THTElevationAtPoint } from "./terrain_elevation.js";
 
 /**
  * Highlight a rectangular shaped portion of the line.
@@ -82,22 +83,14 @@ export function segmentElevationLabel(ruler, segment) {
   // So display any nonzero elevation at that point.
   const displayCurrentElevation = elevationChanged || (!ruler.token && elevation) || (elevation && segment.history);
 
-  // Put together the two parts of the label: current elevation and total elevation.
-  const labelParts = [];
+  // Show only the arrow with elevation change (no @ current elevation).
   const units = canvas.scene.grid.units;
-  if ( displayCurrentElevation ) {
-    let elevLabel = `@${roundMultiple(elevation)}`;
-    if ( units ) elevLabel += ` ${units}`;
-    labelParts.push(elevLabel);
-  }
-  if ( displayTotalChange ) {
-    const segmentArrow = (elevationDelta > 0) ? "↑" :"↓";
-    let totalChange = `[${segmentArrow}${Math.abs(roundMultiple(elevationDelta))}`;
-    totalChange += (units ? ` ${units}]` : "]");
-    labelParts.push(totalChange);
-  }
+  if ( !displayTotalChange ) return "";
+  const segmentArrow = (elevationDelta > 0) ? "↑" : "↓";
+  let label = `${segmentArrow}${Math.abs(roundMultiple(elevationDelta))}`;
+  if ( units ) label += ` ${units}`;
   segment.label.style.align = segment.last ? "center" : "right";
-  return labelParts.join(" ");
+  return label;
 }
 
 /**
@@ -110,7 +103,8 @@ export function segmentElevationLabel(ruler, segment) {
  *   - @prop {boolean} elevationChanged   Did elevation change at 1+ waypoints
  */
 function elevationForRulerLabel(ruler, segment) {
-  // If this is the last segment, show the total elevation change if any.
+  // z-values now include THT terrain elevation (via terrainElevationAtLocation).
+  // Just use them directly.
   const elevation = CONFIG.GeometryLib.utils.pixelsToGridUnits(segment.ray.B.z);
   const elevationDelta = elevation - ruler.originElevation;
 
@@ -135,12 +129,11 @@ function elevationForRulerLabel(ruler, segment) {
  * @returns {string} The label or "" if none.
  */
 export function segmentTerrainLabel(s) {
-  if ( s.waypoint.cost.almostEqual(s.waypoint.offsetDistance) ) return "";
+  // Show only terrain penalties + climbing malus, not raw elevation movement cost.
+  const addedCost = roundMultiple((s.waypoint.terrainPenalty ?? 0) + (s.waypoint.climbingMalus ?? 0));
+  if ( addedCost === 0 || addedCost.almostEqual(0) ) return "";
   const units = (canvas.scene.grid.units) ? ` ${canvas.scene.grid.units}` : "";
-  const addedCost = roundMultiple(s.waypoint.cost - s.waypoint.offsetDistance);
-  if ( addedCost.almostEqual(0) ) return "";
-  const symbol = addedCost > 0 ? "+" : "-";
-  return `\n${CONFIG[MODULE_ID].SPEED.terrainSymbol} ${symbol}${Math.abs(addedCost)}${units}`;
+  return `${CONFIG[MODULE_ID].SPEED.terrainSymbol} ${Math.abs(addedCost)}${units}`;
 }
 
 
@@ -169,8 +162,14 @@ export function basicTextLabel(ruler, segment, origLabel = "") {
 
   // Put it all together.
   let label = `${origLabel}`;
-  if ( elevLabel !== "" ) label += `\n${elevLabel}`;
-  if ( terrainLabel !== "" ) label += `${terrainLabel}`;
+  if ( elevLabel !== "" ) {
+    // Arrow + warning on same line
+    label += `\n${elevLabel}`;
+    if ( terrainLabel !== "" ) label += ` ${terrainLabel}`;
+  } else if ( terrainLabel !== "" ) {
+    // Warning only: own line
+    label += `\n${terrainLabel}`;
+  }
   return label;
 }
 
@@ -230,10 +229,11 @@ export function customizedTextLabel(ruler, segment, origLabel = "") {
     }
   }
 
-  // (5) Terrain
-  if ( segment.last && !segment.waypoint.cost.almostEqual(segment.waypoint.offsetDistance) ) childLabels.terrain = {
+  // (5) Terrain — show only terrain penalties + climbing malus, not raw elevation movement cost.
+  const addedPenalty = (segment.waypoint.terrainPenalty ?? 0) + (segment.waypoint.climbingMalus ?? 0);
+  if ( segment.last && addedPenalty && !addedPenalty.almostEqual(0) ) childLabels.terrain = {
     icon: `${CONFIG[MODULE_ID].SPEED.terrainSymbol}`,
-    value: segment.waypoint.cost - segment.waypoint.offsetDistance,
+    value: addedPenalty,
     descriptor: game.i18n.localize(`${MODULE_ID}.added`)
   };
 
