@@ -878,8 +878,8 @@ export class MovePenalty {
         const gridPos = canvas.grid.getOffset({ x: point.x, y: point.y });
 
         // Get terrain data at this grid cell using THT API
-        // getCell expects (x=col, y=row) so we pass (j, i)
-        const cellData = tht.API.getCell(gridPos.j, gridPos.i);
+        // getCell expects (row, col) = (i, j) in THT v0.6+
+        const cellData = tht.API.getCell(gridPos.i, gridPos.j);
         if (!cellData || !cellData.length)
             return [];
 
