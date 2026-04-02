@@ -3,7 +3,7 @@
     "title": "Elevation Ruler",
     "id": "elevationruler",
     "description": "Modify Foundry VTT ruler for use when dragging tokens, pathfinding, and measuring elevation.",
-    "version": "0.11.5",
+    "version": "0.11.6",
     "library": false,
     "compatibility": {
         "minimum": "12",

@@ -382,7 +382,7 @@ export function THTElevationAtPoint(location, startingElevation = 0) {
   if ( !tht.ACTIVE || !tht.API ) return null;
 
   const gridPos = canvas.grid.getOffset({ x: location.x, y: location.y });
-  const cellData = tht.API.getCell(gridPos.i, gridPos.j);
+  const cellData = tht.API.getCell(gridPos.j, gridPos.i);
   if ( !cellData || !cellData.length ) return null;
 
   // Get terrain type configs to filter by usesHeight && isSolid (matching THT's own logic).
