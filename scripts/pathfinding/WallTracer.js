@@ -697,8 +697,9 @@ export class WallTracer extends Graph {
 
     // Pad the constrained token border as necessary.
     const borderShape = token.constrainedTokenBorder;
+    if ( !borderShape || typeof borderShape.iterateEdges !== "function" ) return;
     const buffer = CONFIG[MODULE_ID].tokenPathfindingBuffer ?? 0;
-    if ( buffer ) borderShape.pad(buffer);
+    if ( buffer && typeof borderShape.pad === "function" ) borderShape.pad(buffer);
 
     // Construct a new token edge set.
     const edgeIter = borderShape.iterateEdges();
