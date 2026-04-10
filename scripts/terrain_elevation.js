@@ -381,8 +381,14 @@ export function THTElevationAtPoint(location, startingElevation = 0) {
   const tht = OTHER_MODULES.TERRAIN_HEIGHT_TOOLS;
   if ( !tht.ACTIVE || !tht.API ) return null;
 
-  const gridPos = canvas.grid.getOffset({ x: location.x, y: location.y });
-  const cellData = tht.API.getCell(gridPos.j, gridPos.i);
+  // getCell requires a grid; use getShapesAtPoint on gridless scenes.
+  let cellData;
+  if ( canvas.grid.type === CONST.GRID_TYPES.GRIDLESS ) {
+    cellData = tht.API.getShapesAtPoint?.(location.x, location.y);
+  } else {
+    const gridPos = canvas.grid.getOffset({ x: location.x, y: location.y });
+    cellData = tht.API.getCell(gridPos.j, gridPos.i);
+  }
   if ( !cellData || !cellData.length ) return null;
 
   // Get terrain type configs to filter by usesHeight && isSolid (matching THT's own logic).
