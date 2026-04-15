@@ -9,6 +9,7 @@ game
 import { Settings } from "../settings.js";
 import { log } from "../util.js";
 import { THTElevationAtPoint } from "../terrain_elevation.js";
+import { MovePenalty } from "./MovePenalty.js";
 
 /**
  * Modify Grid classes to measure in 3d.
@@ -113,86 +114,104 @@ function _measurePath(wrapped, waypoints, { cost }, result) {
     segment.spaces = path3d.length - 1;
     segment._calculatedPath = path3d; // Store the actual path used for calculations
     
-    const isFlying = !!canvas.controls.ruler.token?.actor?.statuses.has("flying");
-    let verticalCost = 0;
-    {
-      const dz = Math.abs(end.z - start.z);
-      const manualElev = CONFIG.GeometryLib.utils.pixelsToGridUnits(dz);
-      if ( isFlying ) {
-        // Flying: each elevation unit costs 1 (no malus). Total = H + N.
-        // Bresenham gives max(H, N) per-step. verticalCost = min(H, N) to compensate.
-        const path2d = canvas.grid.getDirectPath([
-          { ...canvas.grid.getCenterPoint(canvas.grid.getOffset(start)), z: 0 },
-          { ...canvas.grid.getCenterPoint(canvas.grid.getOffset(end)), z: 0 }
-        ]);
-        const hDist = Math.max(0, path2d.length - 1);
-        verticalCost = Math.min(hDist, manualElev);
-      } else {
-        verticalCost = manualElev;
+    const token = canvas.controls.ruler?.token ?? null;
+    // Climb is still charged; only the (climb-1) malus is suppressed for immune tokens
+    // (flying / Lancer climber / elevation-immunity bonuses — see MovePenalty statics).
+    const noClimbMalus = MovePenalty.isClimbingImmune(token);
+    // Flying mode ([G] toggle): track cumulative max terrain elevation across steps.
+    // Step climb = max(0, maxSoFar - prevEffective). Descents contribute nothing.
+    const flyingMode = Settings.FLYING_MODE;
+    const manualChange = CONFIG.GeometryLib.utils.pixelsToGridUnits(end.z - start.z);
+
+    // Manual [/] climb applies once, on the last hex actually entered.
+    const realStepIndices = [];
+    for ( let j = 1, n = path3d.length; j < n; j += 1 ) {
+      if ( path3d[j - 1].i !== path3d[j].i || path3d[j - 1].j !== path3d[j].j ) {
+        realStepIndices.push(j);
       }
     }
+    const lastRealIdx = realStepIndices.length ? realStepIndices.at(-1) : -1;
 
-    let prevPathPt = GridCoordinates3d.fromObject({ ...path3d[0], z: 0 }); // Path points are GridCoordinates3d.
+    let prevPathPt = GridCoordinates3d.fromObject({ ...path3d[0], z: 0 });
     const prevDiagonals = offsetDistanceFn.diagonals;
+    const startThtAtPoint = THTElevationAtPoint(prevPathPt, 0, token) ?? 0;
+    // In flying mode the token carries its cumulative-max altitude across segments.
+    // Seed prevThtElev with max(THT_at_start, token's actual start elevation) so the
+    // per-step loop doesn't treat an already-elevated flyer as starting from 0.
+    const startElevGrid = CONFIG.GeometryLib.utils.pixelsToGridUnits(start.z);
+    let prevThtElev = flyingMode ? Math.max(startThtAtPoint, startElevGrid) : startThtAtPoint;
+    let totalClimbMalus = 0;
+
+    // In flying mode, waypoint.elevation carries the cumulative path-max.
+    // Ruler stripping only removes the destination's THT top, so any auto-lift
+    // ABOVE the destination survives into manualChange and must be subtracted out
+    // here to avoid double-counting the per-step cumulative climb.
+    let flyingAutoRise = 0;
+    if ( flyingMode ) {
+      let pathMax = prevThtElev;
+      for ( let j = 1, n = path3d.length; j < n; j += 1 ) {
+        const e = THTElevationAtPoint(path3d[j], 0, token) ?? 0;
+        if ( e > pathMax ) pathMax = e;
+      }
+      const destThtRaw = THTElevationAtPoint(path3d[path3d.length - 1], 0, token) ?? 0;
+      flyingAutoRise = Math.max(0, pathMax - destThtRaw);
+    }
+    const effectiveManualChange = manualChange - (manualChange >= 0 ? 1 : -1) * Math.min(Math.abs(manualChange), flyingAutoRise);
+
     for ( let j = 1, n = path3d.length; j < n; j += 1 ) {
       const currPathPt = path3d[j];
       const dist = GridCoordinates3d.gridDistanceBetween(prevPathPt, currPathPt, { altGridDistanceFn, diagonals });
       const offsetDistance = offsetDistanceFn(prevPathPt, currPathPt);
       segment.distance += dist;
       segment.offsetDistance += offsetDistance;
+
+      // Bresenham emits pure-vertical sub-steps for max(H,N)>H. Skip them here:
+      // their climb is folded into the next real hex step, and they never cost
+      // horizontal or flat penalty (we never re-entered a new 2D cell).
+      const sameCell = prevPathPt.i === currPathPt.i && prevPathPt.j === currPathPt.j;
+      if ( sameCell ) {
+        prevPathPt = currPathPt;
+        continue;
+      }
+
       segment.cost += cost(prevPathPt, { ...currPathPt, z: 0 }, offsetDistance);
+
+      const rawCurrThtElev = THTElevationAtPoint(currPathPt, 0, token) ?? 0;
+      // In flying mode the effective elevation is cumulative-max (never descends).
+      const currThtElev = flyingMode ? Math.max(prevThtElev, rawCurrThtElev) : rawCurrThtElev;
+      const thtDelta = currThtElev - prevThtElev;
+      const manualDelta = (j === lastRealIdx) ? effectiveManualChange : 0;
+      const stepDelta = thtDelta + manualDelta;
+      const climb = Math.abs(stepDelta);
+      if ( climb > 0 ) {
+        const malus = noClimbMalus ? 0 : Math.max(0, climb - 1);
+        segment.cost += climb + malus;
+        totalClimbMalus += malus;
+      }
+      prevThtElev = currThtElev;
       prevPathPt = currPathPt;
     }
     segment.diagonals = offsetDistanceFn.diagonals - prevDiagonals;
 
-    // Same hex, no movement: force cost to 0 (Foundry may produce a phantom 1).
-    const startOffset = canvas.grid.getOffset(start);
-    const endOffset = canvas.grid.getOffset(end);
-    const sameHex = startOffset.i === endOffset.i && startOffset.j === endOffset.j;
-    if ( sameHex && verticalCost === 0 && start.z === end.z ) {
+    // No 2D movement but a manual climb (e.g. user pressed [/] without dragging):
+    // the per-hex loop never ran, so charge the climb here.
+    if ( lastRealIdx === -1 && manualChange !== 0 ) {
+      const climb = Math.abs(manualChange);
+      const malus = noClimbMalus ? 0 : Math.max(0, climb - 1);
+      segment.cost += climb + malus;
+      totalClimbMalus += malus;
+    }
+
+    // Same-position guard. Pixel comparison, not grid offsets: when a token
+    // center sits on a hex vertex, getOffset can return the same offset for two
+    // genuinely different positions and the cost would falsely zero out.
+    const sameHex = (Math.abs(start.x - end.x) < 1 && Math.abs(start.y - end.y) < 1);
+    if ( sameHex && start.z === end.z ) {
       segment.cost = 0;
       segment.distance = 0;
       segment.offsetDistance = 0;
     }
-
-    // Adjust verticalCost when both manual [/] and THT terrain elevation exist.
-    if ( verticalCost > 0 ) {
-      const thtStart = THTElevationAtPoint(start) ?? 0;
-      const thtEnd = THTElevationAtPoint(end) ?? 0;
-      const thtChange = thtEnd - thtStart;
-      const manualChange = CONFIG.GeometryLib.utils.pixelsToGridUnits(end.z - start.z);
-      const manualElev = Math.abs(manualChange);
-
-      // Track manual climbing malus for label display (first elevation unit is free).
-      let manualMalus = isFlying ? 0 : Math.max(0, manualElev - 1);
-
-      if ( thtChange !== 0 ) {
-        const absTht = Math.abs(thtChange);
-        const absManual = Math.abs(manualChange);
-        const sameDir = Math.sign(thtChange) === Math.sign(manualChange);
-
-        // MovePenalty charge: with malus N+(N-1), or without malus just N.
-        const malusFn = (n) => isFlying ? n : n + Math.max(0, n - 1);
-
-        if ( sameDir ) {
-          // Same direction: bridge the double "first unit" discount (normal only).
-          if ( !isFlying ) {
-            verticalCost += 1;
-            manualMalus += 1; // Bridge malus: both manual + THT share one "first unit free"
-          }
-        } else {
-          // Opposite directions: manual cancels some THT.
-          const cancelled = Math.min(absTht, absManual);
-          const remaining = absTht - cancelled;
-          verticalCost -= cancelled + (malusFn(absTht) - malusFn(remaining));
-        }
-      }
-
-      // Pure vertical movement (same hex): remove phantom horizontal from bresenham.
-      if ( sameHex ) segment.cost -= 1;
-      segment.manualClimbingMalus = manualMalus;
-    }
-    segment.cost += verticalCost;
+    segment.manualClimbingMalus = totalClimbMalus;
 
     // Accumulate the waypoint totals
     const resultStartWaypoint = result.waypoints[i - 1];

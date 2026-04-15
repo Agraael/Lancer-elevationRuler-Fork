@@ -107,7 +107,8 @@ const KEYBINDINGS = {
     TOGGLE_PATHFINDING: "togglePathfinding",
     FORCE_TO_GROUND: "forceToGround",
     TELEPORT: "teleport",
-    FREE_MOVEMENT: "freeMovement"
+    FREE_MOVEMENT: "freeMovement",
+    DEBUG_MOVEMENT: "debugMovement"
 };
 
 
@@ -124,8 +125,19 @@ export class Settings extends ModuleSettingsAbstract {
     /** @type {boolean} */
     static FORCE_TO_GROUND = false;
 
+    /** @type {boolean} Toggled by [G] during a measurement. Auto-elevation only goes UP
+     *  (terrain rises raise the token; descents are ignored), and the highest attained
+     *  elevation is preserved across waypoints. Manual [/] still applies on top. */
+    static FLYING_MODE = false;
+
     /** @type {boolean} */
     static FORCE_FREE_MOVEMENT = false;
+
+    /** @type {boolean} */
+    static FORCE_DEBUG_MOVEMENT = false;
+
+    /** @type {boolean} */
+    static FORCE_TELEPORT = false;
 
     /**
    * Register all settings
@@ -540,11 +552,11 @@ export class Settings extends ModuleSettingsAbstract {
                 const ruler = canvas.controls.ruler;
                 if (!ruler.active)
                     return;
-                this.FORCE_TO_GROUND = !this.FORCE_TO_GROUND;
-                ruler.waypoints.at(-1)._forceToGround = this.FORCE_TO_GROUND;
+                this.FLYING_MODE = !this.FLYING_MODE;
+                ruler.waypoints.at(-1)._flyingMode = this.FLYING_MODE;
 
                 ruler.measure(ruler.destination, { force: true });
-                ui.notifications.info(`Ruler measure to ground ${this.FORCE_TO_GROUND ? "enabled" : "disabled"}.`);
+                ui.notifications.info(`Flying mode ${this.FLYING_MODE ? "enabled" : "disabled"}.`);
             },
             precedence: CONST.KEYBINDING_PRECEDENCE.NORMAL
         });
@@ -555,6 +567,18 @@ export class Settings extends ModuleSettingsAbstract {
             editable: [
                 { key: "KeyT" }
             ],
+            onDown: () => {
+                this.FORCE_TELEPORT ||= true;
+                const ruler = canvas.controls.ruler;
+                if (ruler._state === Ruler.STATES.MEASURING)
+                    ruler.measure(ruler.destination, { force: true });
+            },
+            onUp: () => {
+                this.FORCE_TELEPORT &&= false;
+                const ruler = canvas.controls.ruler;
+                if (ruler._state === Ruler.STATES.MEASURING)
+                    ruler.measure(ruler.destination, { force: true });
+            },
             precedence: CONST.KEYBINDING_PRECEDENCE.NORMAL
         });
 
@@ -572,6 +596,27 @@ export class Settings extends ModuleSettingsAbstract {
             },
             onUp: () => {
                 this.FORCE_FREE_MOVEMENT &&= false;
+                const ruler = canvas.controls.ruler;
+                if (ruler._state === Ruler.STATES.MEASURING)
+                    ruler.measure(ruler.destination, { force: true });
+            },
+            precedence: CONST.KEYBINDING_PRECEDENCE.NORMAL
+        });
+
+        game.keybindings.register(MODULE_ID, KEYBINDINGS.DEBUG_MOVEMENT, {
+            name: "Debug Movement",
+            hint: "Hold while dragging a token to skip all movement automation (no triggers, no history, no engagement, no highlights).",
+            editable: [
+                { key: "KeyV" }
+            ],
+            onDown: () => {
+                this.FORCE_DEBUG_MOVEMENT ||= true;
+                const ruler = canvas.controls.ruler;
+                if (ruler._state === Ruler.STATES.MEASURING)
+                    ruler.measure(ruler.destination, { force: true });
+            },
+            onUp: () => {
+                this.FORCE_DEBUG_MOVEMENT &&= false;
                 const ruler = canvas.controls.ruler;
                 if (ruler._state === Ruler.STATES.MEASURING)
                     ruler.measure(ruler.destination, { force: true });

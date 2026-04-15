@@ -377,21 +377,9 @@ export class MovePenalty {
                 const gridCost = this.movementCostForGridSpace(startCoords, endCoords, costFreeDistance);
                 this.lastTerrainPenalty = Math.max(0, gridCost - costFreeDistance);
                 let baseCost = gridCost;
-                {
-                    // Add penalty for terrain elevation change.
-                    // Normal: first unit costs 1, each additional costs 2 (climbing malus).
-                    // Flying/climber (_noClimbingMalus): each unit costs 1.
-                    const startTerrainElev = this.getTerrainElevationAt(startCoords);
-                    const endTerrainElev = this.getTerrainElevationAt(endCoords);
-                    if (startTerrainElev !== null && endTerrainElev !== null) {
-                        const elevationChange = Math.floor(Math.abs(endTerrainElev - startTerrainElev));
-                        if (elevationChange > 0) {
-                            const malus = this._noClimbingMalus ? 0 : (elevationChange - 1);
-                            baseCost += elevationChange + malus;
-                            this.lastClimbingMalus = malus;
-                        }
-                    }
-                }
+                // THT elevation changes are billed by Grid.js (single unified climb:
+                // per-step THT deltas + endpoint manual [/], with "first unit free,
+                // rest +1 malus" applied once across the whole segment).
 
                 this.#penaltyCache.set(key, { cost: baseCost, terrainPenalty: this.lastTerrainPenalty, climbingMalus: this.lastClimbingMalus });
                 if (CONFIG[MODULE_ID].debug)
@@ -424,17 +412,7 @@ export class MovePenalty {
                 multiStepTerrainPenalty += Math.max(0, gridStepCost - offsetDist);
                 let stepCost = gridStepCost - offsetDist;
 
-                {
-                    // Normal: climbing malus. Flying/climber (_noClimbingMalus): each unit costs 1.
-                    if (prevTerrainElevation !== null && currTerrainElevation !== null) {
-                        const elevationChange = Math.floor(Math.abs(currTerrainElevation - prevTerrainElevation));
-                        if (elevationChange > 0) {
-                            const malus = this._noClimbingMalus ? 0 : (elevationChange - 1);
-                            stepCost += elevationChange + malus;
-                            multiStepClimbingMalus += malus;
-                        }
-                    }
-                }
+                // THT elevation changes are billed by Grid.js; see one-step case above.
 
                 totalCost += stepCost;
                 prevOffset = currOffset;
@@ -469,7 +447,13 @@ export class MovePenalty {
    * @returns {number} The additional cost, in grid units, plus the costFreeDistance.
    */
     movementCostForGridSpace(prevCoords, coords, costFreeDistance = 0) {
-    // Determine what regions, tokens, drawings overlap the center point.
+    // Terrain-immune tokens pay no flat penalty and no terrain multipliers.
+        if (this.constructor.isTerrainImmune(canvas.controls.ruler?.token)) {
+            this.lastTerrainPenalty = 0;
+            return costFreeDistance;
+        }
+
+        // Determine what regions, tokens, drawings overlap the center point.
         const centerPt = coords.center;
 
         // Did we already test this coordinate?
@@ -513,12 +497,16 @@ export class MovePenalty {
         });
 
         const tokenElevation = canvas.controls.ruler.token?.elevationE;
-        // Terrain Height Tools terrains - add movement penalty
+        // Terrain Height Tools terrains — take the MAX penalty across the token's
+        // footprint (not the sum), so larger tokens aren't disproportionately taxed
+        // when straddling mixed terrain.
+        let thtFlatPenalty = 0;
         thtTerrains.forEach(({ terrain, type }) => {
             if (type.movementPenalty > 0 && tokenElevation >= terrain.elevation && tokenElevation <= terrain.height) {
-                flatPenalty += type.movementPenalty;
+                if (type.movementPenalty > thtFlatPenalty) thtFlatPenalty = type.movementPenalty;
             }
         });
+        flatPenalty += thtFlatPenalty;
 
         // Tokens
         const tokenMultiplier = this.constructor.tokenMultiplier;
@@ -723,19 +711,32 @@ export class MovePenalty {
         if (!tht)
             return null;
 
-        const centerPt = coords.center;
-        const terrains = this.constructor.getTerrainHeightToolsAt(centerPt);
-        if (terrains.length === 0)
-            return 0;
+        // Sample every hex under the token's footprint at `coords` and return the
+        // MAX terrain top across them — a token's climb is dictated by whichever
+        // occupied hex stands highest, not by the single cell under its center.
+        const token = canvas.controls.ruler?.token;
+        let spaces;
+        if (token) {
+            const centerPt = coords.center;
+            const gridPos = canvas.grid.getOffset({ x: centerPt.x, y: centerPt.y });
+            const tokenShape = getTokenShape(token);
+            const area = getAreaFromPositionAndShape({ x: gridPos.j, y: gridPos.i }, tokenShape);
+            spaces = area.map(space => canvas.grid.getCenterPoint({ j: space.x, i: space.y }));
+        } else {
+            spaces = [coords.center];
+        }
 
-        // Return the highest terrain top (elevation + height) for solid, height-using terrains
-        // (matching THT's own getHighestTerrainUnderToken logic).
-        return terrains.reduce((max, { terrain, type }) => {
-            if (type.usesHeight && type.isSolid) {
-                return Math.max(max, terrain.elevation + terrain.height);
+        let maxTop = null;
+        for (const pt of spaces) {
+            const terrains = this.constructor.getTerrainHeightToolsAt(pt);
+            for (const { terrain, type } of terrains) {
+                if (type.usesHeight && type.isSolid) {
+                    const top = terrain.elevation + terrain.height;
+                    if (maxTop === null || top > maxTop) maxTop = top;
+                }
             }
-            return max;
-        }, 0);
+        }
+        return maxTop ?? 0;
     }
 
     // ----- NOTE: Static getters ----- //
@@ -758,6 +759,27 @@ export class MovePenalty {
     /** @type {object|undefined} */
     static get terrainHeightToolsAPI() {
         return OTHER_MODULES.TERRAIN_HEIGHT_TOOLS.API;
+    }
+
+    /**
+     * Token is exempt from the climbing malus (the `(climb - 1)` surcharge per step).
+     * The climb units themselves are still charged — this only suppresses the malus.
+     * Override in modules (e.g. Lancer climber / elevation-immunity bonuses) to extend.
+     * @param {Token} [token]
+     * @returns {boolean}
+     */
+    static isClimbingImmune(token) {
+        return !!token?.actor?.statuses?.has("flying");
+    }
+
+    /**
+     * Token is exempt from flat terrain movement penalties (difficult terrain, etc.).
+     * Override in modules (e.g. Lancer terrain_immunity) to extend.
+     * @param {Token} [token]
+     * @returns {boolean}
+     */
+    static isTerrainImmune(_token) {
+        return false;
     }
 
     // ----- NOTE: Static methods ----- //

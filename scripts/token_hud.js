@@ -108,7 +108,7 @@ function dnd5eMovementType(token, position) {
 function determineMovementType(token, position) {
   position ??= { ...token.center, elevation: token.elevationE, z: token.elevationZ };
   const startingElevation = (position.elevation ?? CONFIG.GeometryLib.utils.pixelsToGridUnits(position.z)) || 0; // Strip NaN
-  const groundElevation = CONFIG.Canvas.rulerClass.terrainElevationAtLocation(position, startingElevation);
+  const groundElevation = CONFIG.Canvas.rulerClass.terrainElevationAtLocation(position, startingElevation, token);
   return MOVEMENT_TYPES.forCurrentElevation(position.elevation, groundElevation);
 }
 

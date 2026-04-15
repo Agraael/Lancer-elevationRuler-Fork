@@ -211,7 +211,7 @@ Hooks.on("preCreateToken", (tokenDoc, _createData, _options, userId) => {
   // tokenDoc.x/y is top-left corner — convert to center for correct hex lookup.
   const centerX = tokenDoc.x + (canvas.grid.sizeX ?? canvas.grid.size) * (tokenDoc.width ?? 1) / 2;
   const centerY = tokenDoc.y + (canvas.grid.sizeY ?? canvas.grid.size) * (tokenDoc.height ?? 1) / 2;
-  const terrainElev = THTElevationAtPoint({ x: centerX, y: centerY }) ?? 0;
+  const terrainElev = THTElevationAtPoint({ x: centerX, y: centerY }, 0, tokenDoc) ?? 0;
   if (terrainElev > 0) {
     const sceneDistance = canvas.scene.dimensions?.distance ?? 1;
     tokenDoc.updateSource({ elevation: terrainElev * sceneDistance });

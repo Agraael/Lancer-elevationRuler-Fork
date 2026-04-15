@@ -162,6 +162,8 @@ export function basicTextLabel(ruler, segment, origLabel = "") {
 
   // Put it all together.
   let label = `${origLabel}`;
+  // Flying-mode indicator (toggled with [G] during a measurement).
+  if ( Settings.FLYING_MODE ) label = `\ud83e\udeb6 ${label}`;
   if ( elevLabel !== "" ) {
     // Arrow + warning on same line
     label += `\n${elevLabel}`;

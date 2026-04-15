@@ -179,20 +179,37 @@ export function elevationFromWaypoint(waypoint, location, token) {
   // This ensures a token at terrain 3 + manual offset 1 (= 4) drops to terrain 0 + offset 1 (= 1)
   // when moving to flat ground, instead of staying at 4.
   // Use a clean {x,y} point so the fallback doesn't return waypoint.elevation as "terrain".
-  const waypointTerrainE = terrainElevationAtLocation({ x: waypoint.x, y: waypoint.y }, waypoint.elevation);
+  const waypointTerrainE = terrainElevationAtLocation({ x: waypoint.x, y: waypoint.y }, waypoint.elevation, token);
   const offsetAboveTerrain = waypoint.elevation - waypointTerrainE;
   const gridDistance = canvas.scene.grid.distance;
   const isOnTerrainSurface = isTokenRuler
     && offsetAboveTerrain >= 0 && offsetAboveTerrain <= gridDistance;
 
   let locationElevation;
-  if ( isOnTerrainSurface ) {
+  if ( Settings.FLYING_MODE ) {
+    // Flying mode: auto-elevation only goes UP. Token rises to clear the highest
+    // terrain encountered ALONG the path from the previous waypoint to here, and
+    // never drops back down automatically. Manual [/] still applies on top.
+    let pathMaxTht = terrainElevationAtLocation(location, waypoint.elevation, token);
+    try {
+      const path = canvas.grid.getDirectPath([
+        { x: waypoint.x, y: waypoint.y },
+        { x: location.x, y: location.y }
+      ]);
+      for ( const offset of path ) {
+        const pt = canvas.grid.getCenterPoint(offset);
+        const e = terrainElevationAtLocation(pt, waypoint.elevation, token);
+        if ( e > pathMaxTht ) pathMaxTht = e;
+      }
+    } catch ( _e ) { /* fall back to destination-only */ }
+    locationElevation = Math.max(waypoint.elevation, pathMaxTht);
+  } else if ( isOnTerrainSurface ) {
     // Non-flying token on terrain surface: follow terrain, preserve offset above ground.
-    const destTerrainE = terrainElevationAtLocation(location, waypoint.elevation);
+    const destTerrainE = terrainElevationAtLocation(location, waypoint.elevation, token);
     locationElevation = destTerrainE + offsetAboveTerrain;
   } else if ( !isTokenRuler ) {
     let maxTokenE;
-    const terrainE = terrainElevationAtLocation(location, waypoint.elevation);
+    const terrainE = terrainElevationAtLocation(location, waypoint.elevation, token);
 
     // For normal ruler, if hovering over a token, use that token's elevation.
     // Use the maximum token elevation unless terrain is above us (e.g., tile above).
@@ -205,7 +222,8 @@ export function elevationFromWaypoint(waypoint, location, token) {
     else locationElevation = elevationAtLocation(location, {
       startE: waypoint.elevation,
       forceToGround: Settings.FORCE_TO_GROUND
-        || waypoint.elevation.almostEqual(waypointTerrainE)
+        || waypoint.elevation.almostEqual(waypointTerrainE),
+      token
     });
   } else locationElevation = tokenElevationForMovement(waypoint, location, {
     token,
@@ -224,8 +242,8 @@ export function elevationFromWaypoint(waypoint, location, token) {
  *                                                      nearest ground to that 3d point
  * @returns {number} The destination elevation, in grid units
  */
-function elevationAtLocation(location, { startE = 0, forceToGround = false } ) {
-  const terrainE = terrainElevationAtLocation(location, startE);
+function elevationAtLocation(location, { startE = 0, forceToGround = false, token = null } = {} ) {
+  const terrainE = terrainElevationAtLocation(location, startE, token);
   return forceToGround ? terrainE : Math.max(terrainE, startE);
 }
 
@@ -272,13 +290,13 @@ function maxTokenElevationAtLocation(location, ceiling = Number.POSITIVE_INFINIT
  * @param {Token} [opts.movementToken]          Assumed token for the measurement. Relevant for EV.
  * @returns {number} Elevation, in grid units.
  */
-export function terrainElevationAtLocation(location, startingElevation = 0) {
+export function terrainElevationAtLocation(location, startingElevation = 0, token = null) {
   // If certain modules are active, use them to calculate elevation.
   // For now, take the first one that is present.
   const tmRes = TMElevationAtPoint(location, startingElevation);
   if ( isFinite(tmRes) ) return tmRes;
 
-  const thtRes = THTElevationAtPoint(location, startingElevation);
+  const thtRes = THTElevationAtPoint(location, startingElevation, token);
   if ( thtRes !== null && isFinite(thtRes) ) return thtRes;
 
   const levelsRes = LevelsElevationAtPoint(location, startingElevation);
@@ -376,33 +394,118 @@ function TMPathForMovement(start, end, opts) {
  * @param {number} [startingElevation=0]      Starting elevation for filtering
  * @returns {number|null} Elevation in grid units, or null if THT inactive or no terrain at location.
  */
-export function THTElevationAtPoint(location, startingElevation = 0) {
+export function THTElevationAtPoint(location, _startingElevation = 0, token = null) {
   if ( !Settings.get(Settings.KEYS.TERRAIN_HEIGHT_TOOLS) ) return null;
   const tht = OTHER_MODULES.TERRAIN_HEIGHT_TOOLS;
   if ( !tht.ACTIVE || !tht.API ) return null;
 
-  // getCell requires a grid; use getShapesAtPoint on gridless scenes.
-  let cellData;
-  if ( canvas.grid.type === CONST.GRID_TYPES.GRIDLESS ) {
-    cellData = tht.API.getShapesAtPoint?.(location.x, location.y);
-  } else {
-    const gridPos = canvas.grid.getOffset({ x: location.x, y: location.y });
-    cellData = tht.API.getCell(gridPos.j, gridPos.i);
-  }
-  if ( !cellData || !cellData.length ) return null;
-
-  // Get terrain type configs to filter by usesHeight && isSolid (matching THT's own logic).
   const terrainTypes = tht.getTerrainTypes?.() || [];
+  const typeById = new Map(terrainTypes.map(t => [t.id, t]));
 
-  // Return the top of the highest solid, height-using terrain at this cell.
-  let maxElevation = null;
-  for ( const terrain of cellData ) {
-    const terrainType = terrainTypes.find(t => t.id === terrain.terrainTypeId);
-    if ( !terrainType?.usesHeight || !terrainType?.isSolid ) continue;
-    const top = terrain.elevation + terrain.height;
-    if ( maxElevation === null || top > maxElevation ) maxElevation = top;
+  // Compute the top-of-solid-terrain for a single cell's terrain-data array.
+  const topForCellData = cellData => {
+    if ( !cellData || !cellData.length ) return null;
+    let top = null;
+    for ( const terrain of cellData ) {
+      const tt = typeById.get(terrain.terrainTypeId);
+      if ( !tt?.usesHeight || !tt?.isSolid ) continue;
+      const t = terrain.elevation + terrain.height;
+      if ( top === null || t > top ) top = t;
+    }
+    return top;
+  };
+
+  const gridless = canvas.grid.type === CONST.GRID_TYPES.GRIDLESS;
+
+  // Collect per-cell top elevations across all hexes the token occupies.
+  // When a location is provided it anchors the footprint there (for dragging/preview);
+  // otherwise we use the token's current x/y.
+  const tops = [];
+  const offsets = (!gridless && token) ? getTokenOccupiedOffsets(token, location) : null;
+  if ( offsets && offsets.length ) {
+    for ( const off of offsets ) {
+      const top = topForCellData(tht.API.getCell(off.j, off.i));
+      if ( top !== null ) tops.push(top);
+    }
+  } else {
+    // Fallback: single-point sample at the provided location.
+    const cellData = gridless
+      ? tht.API.getShapesAtPoint?.(location.x, location.y)
+      : (() => {
+        const gridPos = canvas.grid.getOffset({ x: location.x, y: location.y });
+        return tht.API.getCell(gridPos.j, gridPos.i);
+      })();
+    const top = topForCellData(cellData);
+    if ( top !== null ) tops.push(top);
   }
-  return maxElevation;
+
+  if ( !tops.length ) return null;
+
+  // Highest terrain across all occupied hex centers — if any hex of a multi-hex
+  // token stands on elevated terrain, the token sits on that terrain.
+  let bestTop = tops[0];
+  for ( let i = 1; i < tops.length; i++ ) if ( tops[i] > bestTop ) bestTop = tops[i];
+  return bestTop;
+}
+
+/**
+ * Resolve the grid-cell offsets a token (or TokenDocument) occupies.
+ * Supports placed Tokens, TokenDocuments (incl. unplaced/preCreate).
+ * @param {Token|TokenDocument} token
+ * @returns {{i:number, j:number}[]|null}
+ */
+function getTokenOccupiedOffsets(token, positionOverride = null) {
+  if ( !token ) return null;
+  const doc = token.document ?? token;
+  const placed = (token.shape && token.x !== undefined) ? token : (doc.object ?? null);
+  const grid = canvas.grid;
+  const sizeX = grid.sizeX ?? grid.size;
+  const sizeY = grid.sizeY ?? grid.size;
+  const w = doc.width ?? 1;
+  const h = doc.height ?? 1;
+
+  // Anchor (top-left of footprint). positionOverride is expected to be the token
+  // CENTER during drag previews, so convert it to top-left by subtracting half-size.
+  let ox;
+  let oy;
+  if ( positionOverride ) {
+    ox = positionOverride.x - (sizeX * w / 2);
+    oy = positionOverride.y - (sizeY * h / 2);
+  } else {
+    ox = doc.x ?? placed?.x ?? 0;
+    oy = doc.y ?? placed?.y ?? 0;
+  }
+
+  // Single-hex token: the center offset is enough.
+  if ( w <= 1 && h <= 1 ) {
+    const c = { x: ox + sizeX / 2, y: oy + sizeY / 2 };
+    return [grid.getOffset(c)];
+  }
+
+  // Use the placed token's hex shape (PIXI polygon) for containment — it encodes
+  // hexagonalShape (ellipse/trapezoid/rect) correctly. Fall back to rect if absent.
+  const shape = placed?.shape ?? null;
+  const contains = shape?.contains
+    ? (lx, ly) => shape.contains(lx, ly)
+    : (lx, ly) => lx >= 0 && ly >= 0 && lx <= sizeX * w && ly <= sizeY * h;
+
+  // Scan hexes around the footprint center; keep any whose CENTER lies in the shape.
+  const centerX = ox + (w * sizeX / 2);
+  const centerY = oy + (h * sizeY / 2);
+  const centerOff = grid.getOffset({ x: centerX, y: centerY });
+  const scanRadius = Math.ceil(Math.max(w, h));
+
+  const offsets = [];
+  for ( let di = -scanRadius; di <= scanRadius; di++ ) {
+    for ( let dj = -scanRadius; dj <= scanRadius; dj++ ) {
+      const i = centerOff.i + di;
+      const j = centerOff.j + dj;
+      const c = grid.getCenterPoint({ i, j });
+      if ( contains(c.x - ox, c.y - oy) ) offsets.push({ i, j });
+    }
+  }
+  if ( !offsets.length ) offsets.push(centerOff);
+  return offsets;
 }
 
 // ----- NOTE: LEVELS ELEVATION ----- //

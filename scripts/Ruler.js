@@ -228,7 +228,7 @@ function _addWaypoint(point, { snap = true } = {}) {
     const isOriginWaypoint = !this.waypoints.length;
     if (isOriginWaypoint) {
         waypoint._forceToGround = false;
-        waypoint.elevation = this.token?.elevationE ?? terrainElevationAtLocation(point) ?? 0;
+        waypoint.elevation = this.token?.elevationE ?? terrainElevationAtLocation(point, 0, this.token) ?? 0;
     } else {
         waypoint.elevation = elevationFromWaypoint(this.waypoints.at(-1), waypoint, this.token);
     }
@@ -383,12 +383,15 @@ function _getMeasurementSegments(wrapped) {
         return segments;
     }
 
-    // Restore freeMovement property from history to segments
+    // Restore freeMovement and debugMovement properties from history to segments
     if (this.history && this.history.length > 0) {
         for (let i = 0, h = 1; i < segments.length && h <= this.history.length; i++) {
             const segment = segments[i];
-            if (segment.history && this.history[h] && this.history[h].freeMovement) {
-                segment.freeMovement = true;
+            if (segment.history && this.history[h]) {
+                if (this.history[h].freeMovement)
+                    segment.freeMovement = true;
+                if (this.history[h].debugMovement)
+                    segment.debugMovement = true;
             }
             if (segment.ray.distance > 0)
                 h++;
@@ -401,6 +404,11 @@ function _getMeasurementSegments(wrapped) {
     // Mark the last segment as free movement if the free movement key is pressed
     if (Settings.FORCE_FREE_MOVEMENT && segments.length) {
         segments.at(-1).freeMovement = true;
+    }
+
+    // Mark the last segment as debug movement if the debug movement key is pressed
+    if (Settings.FORCE_DEBUG_MOVEMENT && segments.length) {
+        segments.at(-1).debugMovement = true;
     }
 
     // If no movement token, then no region paths or pathfinding.
@@ -445,7 +453,7 @@ function _getMeasurementSegments(wrapped) {
         for (let i = 1, n = initialPath.length; i < n; i += 1) {
             const nextPt = initialPath[i];
             const movementTypeStart = movementTypeForTokenAt(token, prevPt);
-            const endGround = terrainElevationAtLocation(nextPt, nextPt.elevation);
+            const endGround = terrainElevationAtLocation(nextPt, nextPt.elevation, token);
             const movementTypeEnd = MOVEMENT_TYPES.forCurrentElevation(nextPt.elevation, endGround);
             const flying = movementTypeStart === MOVEMENT_TYPES.FLY || movementTypeEnd === MOVEMENT_TYPES.FLY;
             const burrowing = movementTypeStart === MOVEMENT_TYPES.BURROW || movementTypeEnd === MOVEMENT_TYPES.BURROW;
@@ -510,13 +518,20 @@ function _computeDistance(wrapped) {
     let path = [];
     if (this.segments.length) {
         const A = Point3d.fromObject(this.segments[0].ray.A);
-        A.z -= gridUnitsToPixels(terrainElevationAtLocation(this.segments[0].ray.A, 0));
+        // No token arg: strip THT at the exact ray point. Passing this.token would enumerate
+        // the token's footprint at its CURRENT (origin) position, producing the wrong strip
+        // value at destination endpoints.
+        // Strip using the same footprint-aware THT top that set the waypoint.elevation,
+        // so the remaining z reflects only the user's manual [/] climb. Passing this.token
+        // anchors the footprint at the ray point (positionOverride), not the token's
+        // current canvas position.
+        A.z -= gridUnitsToPixels(terrainElevationAtLocation(this.segments[0].ray.A, 0, this.token));
         path.push(A);
     }
     for (const segment of this.segments) {
         const B = Point3d.fromObject(segment.ray.B);
         B.teleport = segment.teleport;
-        B.z -= gridUnitsToPixels(terrainElevationAtLocation(segment.ray.B, 0));
+        B.z -= gridUnitsToPixels(terrainElevationAtLocation(segment.ray.B, 0, this.token));
         path.push(B);
     }
 
@@ -728,9 +743,21 @@ function _getSegmentLabel(wrapped, segment) {
     if (!segment.label.style.fontFamily.includes("fontAwesome"))
         segment.label.style.fontFamily += ",fontAwesome";
 
+    let label;
     if (Settings.get(Settings.KEYS.LABELING.CUSTOMIZED))
-        return customizedTextLabel(this, segment, origLabel);
-    return basicTextLabel(this, segment, origLabel);
+        label = customizedTextLabel(this, segment, origLabel);
+    else
+        label = basicTextLabel(this, segment, origLabel);
+
+    // Prefix for special movement types
+    if (segment.teleport || (!segment.history && Settings.FORCE_TELEPORT))
+        label = `TLP\n${label}`;
+    else if (segment.debugMovement || (!segment.history && Settings.FORCE_DEBUG_MOVEMENT))
+        label = `DBG\n${label}`;
+    else if (segment.freeMovement || (!segment.history && Settings.FORCE_FREE_MOVEMENT))
+        label = `FREE\n${label}`;
+
+    return label;
 }
 
 function getTerrainHeightToolsAt(point) {
@@ -863,6 +890,10 @@ function highlightSegmentWithTokenShape(ruler, segment, tokenShape, color) {
 const TOKEN_SPEED_SPLITTER = new WeakMap();
 
 function _highlightMeasurementSegment(wrapped, segment) {
+    // Debug movement: no highlight at all
+    if (segment.debugMovement)
+        return;
+
     // If not a token drag ruler and simplified canvas ruler is enabled, behave like a normal ruler.
     if (!this._isTokenRuler && Settings.get(Settings.KEYS.TOKEN_RULER.SIMPLE_CANVAS_RULER))
         return wrapped(segment);
@@ -982,10 +1013,21 @@ async function _animateMovement(wrapped, token) {
     }
     if (game.combat?.active && Settings.get(Settings.KEYS.MEASURING.COMBAT_HISTORY)) {
         token[MODULE_ID] ??= {};
-        token[MODULE_ID].measurementHistory = this._createMeasurementHistory();
-        // Persist to flag for reload restore and cross-client sync.
-        if (token.document.isOwner)
-            token.document.update({ [`flags.${MODULE_ID}.${FLAGS.PATH_HISTORY}`]: token[MODULE_ID].measurementHistory });
+        if (Settings.FORCE_DEBUG_MOVEMENT) {
+            // Append a debug marker at the new position so gap-filling segments get flagged
+            const history = token[MODULE_ID].measurementHistory || [];
+            history.push({ x: token.document.x, y: token.document.y, teleport: true, debugMovement: true, cost: 0, z: 0 });
+            // Also add the destination so the next normal drag starts clean from here
+            const dest = this.destination || { x: token.document.x, y: token.document.y };
+            history.push({ x: dest.x, y: dest.y, debugMovement: true, teleport: true, cost: 0, z: 0 });
+            token[MODULE_ID].measurementHistory = history;
+            if (token.document.isOwner)
+                token.document.update({ [`flags.${MODULE_ID}.${FLAGS.PATH_HISTORY}`]: history });
+        } else {
+            token[MODULE_ID].measurementHistory = this._createMeasurementHistory();
+            if (token.document.isOwner)
+                token.document.update({ [`flags.${MODULE_ID}.${FLAGS.PATH_HISTORY}`]: token[MODULE_ID].measurementHistory });
+        }
     }
 
     return Promise.allSettled(promises);
@@ -1049,9 +1091,10 @@ function _createMeasurementHistory(wrapped) {
         if (s.ray.distance === 0)
             continue;
         history[h].z = s.ray.B.z;
-        // Store freeMovement property for display in history
         if (s.freeMovement)
             history[h].freeMovement = true;
+        if (s.debugMovement)
+            history[h].debugMovement = true;
         h += 1;
     }
     return history;
@@ -1120,7 +1163,9 @@ async function _animateSegment(wrapped, token, segment, destination, updateOptio
         lancerSegmentDistance: Math.round(segment.distance),
         lancerSegmentCost: Math.round(segment.cost),          // full cost incl. terrain + elevation
         lancerTerrainPenalty: Math.round(segment.terrainPenalty ?? 0),
-        lancerFreeMovement: segment.freeMovement  // free movement flag
+        lancerFreeMovement: segment.freeMovement,
+        lancerDebugMovement: segment.debugMovement || false,
+        animate: segment.debugMovement ? false : updateOptions.animate
     });
 
     const res = await wrapped(token, segment, destination, updateOptions);
@@ -1155,6 +1200,7 @@ function clear(wrapper) {
  */
 function _onDragStart(wrapped, event, { isTokenDrag = false } = {}) {
     Settings.FORCE_TO_GROUND = false;
+    Settings.FLYING_MODE = false;
     this._userElevationIncrements = 0;
     this._isTokenRuler = isTokenDrag;
     return wrapped(event);
@@ -1169,7 +1215,7 @@ function _onMoveKeyDown(wrapped, context) {
     const teleportKeys = new Set(game.keybindings.get(MODULE_ID, Settings.KEYBINDINGS.TELEPORT).map(binding =>
         binding.key));
     if (teleportKeys.intersects(game.keyboard.downKeys)) {
-        this.segments.forEach(s => s.teleport = true);
+        this.segments.filter(s => !s.history).forEach(s => s.teleport = true);
         if (this.token && game.modules.get('token-animation-tools')?.active) {
             CONFIG[MODULE_ID] = CONFIG[MODULE_ID] || {};
             CONFIG[MODULE_ID].teleportState = {
@@ -1236,8 +1282,8 @@ async function teleport(_context) {
     if (!this._canMove(this.token))
         return false;
 
-    // Change all segments to teleport.
-    this.segments.forEach(s => s.teleport = true);
+    // Change current (non-history) segments to teleport.
+    this.segments.filter(s => !s.history).forEach(s => s.teleport = true);
     return this.moveToken();
 }
 

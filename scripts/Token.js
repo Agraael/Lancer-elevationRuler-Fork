@@ -34,6 +34,9 @@ PATCHES.HISTORY_PREVIEW = {};
  * @returns {boolean|void}                          Explicitly return false to prevent update of this Document
  */
 function preUpdateToken(document, changes, _options, _userId) {
+    if (_options.lancerDebugMovement)
+        return;
+
     const token = document.object;
     const noPositionChange = (!("x" in changes) || changes.x === document.x) && (!("y" in changes) || changes.y === document.y) && (!("elevation" in changes) || changes.elevation === document.elevation);
 
@@ -104,6 +107,9 @@ function preUpdateToken(document, changes, _options, _userId) {
  * @param {string} userId                           The ID of the User who triggered the update workflow
  */
 function updateToken(document, changed, _options, _userId) {
+    if (_options.lancerDebugMovement)
+        return;
+
     const token = document.object;
 
     // Sync in-memory from flag (cross-client sync + reload restore via flag-only updates).
