@@ -749,13 +749,15 @@ function _getSegmentLabel(wrapped, segment) {
     else
         label = basicTextLabel(this, segment, origLabel);
 
-    // Prefix for special movement types
-    if (segment.teleport || (!segment.history && Settings.FORCE_TELEPORT))
-        label = `TLP\n${label}`;
-    else if (segment.debugMovement || (!segment.history && Settings.FORCE_DEBUG_MOVEMENT))
-        label = `DBG\n${label}`;
-    else if (segment.freeMovement || (!segment.history && Settings.FORCE_FREE_MOVEMENT))
-        label = `FREE\n${label}`;
+    // Prefix for special movement types (only on the live segment, not history)
+    if ( !segment.history ) {
+        if (segment.teleport || Settings.FORCE_TELEPORT)
+            label = `TLP\n${label}`;
+        else if (segment.debugMovement || Settings.FORCE_DEBUG_MOVEMENT)
+            label = `DBG\n${label}`;
+        else if (segment.freeMovement || Settings.FORCE_FREE_MOVEMENT)
+            label = `FREE\n${label}`;
+    }
 
     return label;
 }
