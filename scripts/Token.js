@@ -44,9 +44,11 @@ function preUpdateToken(document, changes, _options, _userId) {
         return;
 
     if (_options.isUndo) {
-        const history = token.elevationruler?.measurementHistory;
-        if (history && history.length >= 1)
-            history.pop();
+        if (!_options._historyTrimmed) {
+            const history = token.elevationruler?.measurementHistory;
+            if (history && history.length >= 1)
+                history.pop();
+        }
         return;
     }
 
@@ -132,12 +134,20 @@ function updateToken(document, changed, _options, _userId) {
         return;
 
     if (_options.isUndo) {
-        const history = token.elevationruler?.measurementHistory;
-        if (history && history.length >= 1) {
-            history.pop();
-            // Persist updated history so other clients and reloads stay in sync.
-            if (token.document.isOwner)
+        if (!_options._historyTrimmed) {
+            const history = token.elevationruler?.measurementHistory;
+            if (history && history.length >= 1) {
+                history.pop();
+                // Persist updated history so other clients and reloads stay in sync.
+                if (token.document.isOwner)
+                    token.document.update({ [`flags.${MODULE_ID}.${FLAGS.PATH_HISTORY}`]: [...history] });
+            }
+        } else {
+            // History already trimmed by caller — just persist
+            const history = token.elevationruler?.measurementHistory;
+            if (history && token.document.isOwner) {
                 token.document.update({ [`flags.${MODULE_ID}.${FLAGS.PATH_HISTORY}`]: [...history] });
+            }
         }
         return;
     }

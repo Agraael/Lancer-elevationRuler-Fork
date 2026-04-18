@@ -1167,7 +1167,8 @@ async function _animateSegment(wrapped, token, segment, destination, updateOptio
         lancerTerrainPenalty: Math.round(segment.terrainPenalty ?? 0),
         lancerFreeMovement: segment.freeMovement,
         lancerDebugMovement: segment.debugMovement || false,
-        animate: segment.debugMovement ? false : updateOptions.animate
+        animate: segment.debugMovement ? false : updateOptions.animate,
+        ...(segment._extraOpts ?? {}),
     });
 
     const res = await wrapped(token, segment, destination, updateOptions);

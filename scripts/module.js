@@ -11,7 +11,7 @@ ui
 
 import { Settings } from "./settings.js";
 import { initializePatching, PATCHER } from "./patching.js";
-import { MODULE_ID, MOVEMENT_TYPES, MOVEMENT_BUTTONS, SPEED, TEMPLATES } from "./const.js";
+import { MODULE_ID, FLAGS, MOVEMENT_TYPES, MOVEMENT_BUTTONS, SPEED, TEMPLATES } from "./const.js";
 import { log, gridShape } from "./util.js";
 import { defaultHPAttribute } from "./system_attributes.js";
 import { registerGeometry } from "./geometry/registration.js";
@@ -180,6 +180,78 @@ Hooks.once("init", function() {
     WallTracer, WallTracerEdge, WallTracerVertex,
 
     clearTokenMovementHistory,
+
+    /**
+     * Measure the movement cost between two points for a token.
+     * @param {Token} token
+     * @param {{ x: number, y: number }} from
+     * @param {{ x: number, y: number }} to
+     * @returns {{ distance: number, cost: number, numDiagonal: number }}
+     */
+    measureMove(token, from, to) {
+      const mp = new MovePenalty(token);
+      return mp.measureSegment(from, to);
+    },
+
+    /**
+     * Move a token to a destination as if dragged with the ruler.
+     * Properly calculates cost, terrain, elevation — then updates via isDrag with correct cost data.
+     * @param {Token} token
+     * @param {{ x: number, y: number, elevation?: number }} destination
+     * @returns {Promise<void>}
+     */
+    async moveTokenTo(token, destination, extraOpts = {}) {
+      // Use the real canvas ruler to simulate a full drag movement.
+      // This goes through the entire ER pipeline: segments, elevation, cost function, history.
+      const ruler = canvas.controls.ruler;
+      const wasActive = ruler.state === Ruler.STATES.MEASURING;
+
+      // Save and clear any existing measurement
+      if (wasActive) {
+        ruler.clear();
+      }
+
+      // Simulate drag start from token
+      const origin = token.center;
+      const fakeEvent = {
+        interactionData: {
+          origin: { x: origin.x, y: origin.y },
+          destination: { x: origin.x, y: origin.y },
+        },
+        data: { origin: { x: origin.x, y: origin.y } },
+      };
+      ruler._onDragStart(fakeEvent, { isTokenDrag: true });
+
+      // Measure to destination
+      const destCenter = { x: destination.x + (token.w / 2), y: destination.y + (token.h / 2) };
+      ruler.measure(destCenter);
+
+      // Extract the segment data before moving
+      const segment = ruler.segments?.[ruler.segments.length - 1];
+      const cost = segment ? Math.round(segment.cost) : 0;
+      const dist = segment ? Math.round(segment.distance) : 0;
+
+      // Execute the move through the ruler pipeline (handles history, flags, animation)
+      // Temporarily patch _canMove to always allow
+      const origCanMove = ruler._canMove;
+      ruler._canMove = () => true;
+
+      // Set destination elevation if provided
+      if (destination.elevation !== undefined && segment?.ray?.B) {
+        const g2p = CONFIG.GeometryLib?.utils?.gridUnitsToPixels ?? (v => v);
+        segment.ray.B.z = g2p(destination.elevation);
+      }
+
+      // Mark segments with extra opts so preUpdateToken passes them through
+      for (const s of (ruler.segments ?? [])) {
+        s._extraOpts = extraOpts;
+      }
+
+      await ruler.moveToken();
+
+      // Restore
+      ruler._canMove = origCanMove;
+    },
 
     Settings
   };
