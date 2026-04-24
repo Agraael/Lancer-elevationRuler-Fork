@@ -500,10 +500,32 @@ export class MovePenalty {
         // Terrain Height Tools terrains — take the MAX penalty across the token's
         // footprint (not the sum), so larger tokens aren't disproportionately taxed
         // when straddling mixed terrain.
+        // Zones (usesHeight=false) have no inherent height; Lancer rule: they
+        // inherit the top of the tallest solid terrain at this position.
+        let solidMaxTop = 0;
+        thtTerrains.forEach(({ terrain, type }) => {
+            if (type.usesHeight && type.isSolid) {
+                const top = terrain.elevation + terrain.height;
+                if (top > solidMaxTop) {
+                    solidMaxTop = top;
+                }
+            }
+        });
         let thtFlatPenalty = 0;
         thtTerrains.forEach(({ terrain, type }) => {
-            if (type.movementPenalty > 0 && tokenElevation >= terrain.elevation && tokenElevation <= terrain.height) {
-                if (type.movementPenalty > thtFlatPenalty) thtFlatPenalty = type.movementPenalty;
+            if (type.movementPenalty <= 0) {
+                return;
+            }
+            let applies;
+            if (type.usesHeight) {
+                const top = terrain.elevation + terrain.height;
+                applies = tokenElevation >= terrain.elevation && tokenElevation < top;
+            } else {
+                const zoneTop = solidMaxTop > 0 ? solidMaxTop : 1;
+                applies = tokenElevation >= 0 && tokenElevation < zoneTop;
+            }
+            if (applies && type.movementPenalty > thtFlatPenalty) {
+                thtFlatPenalty = type.movementPenalty;
             }
         });
         flatPenalty += thtFlatPenalty;
@@ -761,15 +783,19 @@ export class MovePenalty {
         return OTHER_MODULES.TERRAIN_HEIGHT_TOOLS.API;
     }
 
-    /**
-     * Token is exempt from the climbing malus (the `(climb - 1)` surcharge per step).
-     * The climb units themselves are still charged — this only suppresses the malus.
-     * Override in modules (e.g. Lancer climber / elevation-immunity bonuses) to extend.
-     * @param {Token} [token]
-     * @returns {boolean}
-     */
-    static isClimbingImmune(token) {
-        return !!token?.actor?.statuses?.has("flying");
+    /** Override in system modules. @param {Token} [_token] @returns {boolean} */
+    static isFlying(_token) {
+        return false;
+    }
+
+    /** Per-move SPEED cap (grid units); 0 = no cap. @param {Token} [_token] @returns {number} */
+    static getFlyingStep(_token) {
+        return 0;
+    }
+
+    /** Override in system modules. @param {Token} [_token] @returns {boolean} */
+    static isClimbingImmune(_token) {
+        return false;
     }
 
     /**

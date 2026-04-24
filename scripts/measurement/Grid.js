@@ -115,9 +115,8 @@ function _measurePath(wrapped, waypoints, { cost }, result) {
     segment._calculatedPath = path3d; // Store the actual path used for calculations
     
     const token = canvas.controls.ruler?.token ?? null;
-    // Climb is still charged; only the (climb-1) malus is suppressed for immune tokens
-    // (flying / Lancer climber / elevation-immunity bonuses — see MovePenalty statics).
-    const noClimbMalus = MovePenalty.isClimbingImmune(token);
+    const isFlying = MovePenalty.isFlying(token);
+    const noClimbMalus = isFlying || MovePenalty.isClimbingImmune(token);
     // Flying mode ([G] toggle): track cumulative max terrain elevation across steps.
     // Step climb = max(0, maxSoFar - prevEffective). Descents contribute nothing.
     const flyingMode = Settings.FLYING_MODE;
@@ -141,6 +140,7 @@ function _measurePath(wrapped, waypoints, { cost }, result) {
     const startElevGrid = CONFIG.GeometryLib.utils.pixelsToGridUnits(start.z);
     let prevThtElev = flyingMode ? Math.max(startThtAtPoint, startElevGrid) : startThtAtPoint;
     let totalClimbMalus = 0;
+    let totalFlyingClimb = 0;
 
     // In flying mode, waypoint.elevation carries the cumulative path-max.
     // Ruler stripping only removes the destination's THT top, so any auto-lift
@@ -183,7 +183,9 @@ function _measurePath(wrapped, waypoints, { cost }, result) {
       const manualDelta = (j === lastRealIdx) ? effectiveManualChange : 0;
       const stepDelta = thtDelta + manualDelta;
       const climb = Math.abs(stepDelta);
-      if ( climb > 0 ) {
+      if ( climb > 0 && isFlying ) {
+        totalFlyingClimb += climb;
+      } else if ( climb > 0 ) {
         const malus = noClimbMalus ? 0 : Math.max(0, climb - 1);
         segment.cost += climb + malus;
         totalClimbMalus += malus;
@@ -197,9 +199,21 @@ function _measurePath(wrapped, waypoints, { cost }, result) {
     // the per-hex loop never ran, so charge the climb here.
     if ( lastRealIdx === -1 && manualChange !== 0 ) {
       const climb = Math.abs(manualChange);
-      const malus = noClimbMalus ? 0 : Math.max(0, climb - 1);
-      segment.cost += climb + malus;
-      totalClimbMalus += malus;
+      if ( isFlying ) {
+        totalFlyingClimb += climb;
+      } else {
+        const malus = noClimbMalus ? 0 : Math.max(0, climb - 1);
+        segment.cost += climb + malus;
+        totalClimbMalus += malus;
+      }
+    }
+
+    // Flying SPEED cap: V free up to ceil(H/SPEED)*SPEED, then cost = max(H, V).
+    const flyStep = isFlying && totalFlyingClimb > 0 ? MovePenalty.getFlyingStep(token) : 0;
+    const horizontalCost = segment.cost;
+    const flyVCap = flyStep > 0 ? Math.max(1, Math.ceil(horizontalCost / flyStep)) * flyStep : 0;
+    if ( flyStep > 0 && totalFlyingClimb > flyVCap ) {
+      segment.cost = Math.max(horizontalCost, totalFlyingClimb);
     }
 
     // Same-position guard. Pixel comparison, not grid offsets: when a token

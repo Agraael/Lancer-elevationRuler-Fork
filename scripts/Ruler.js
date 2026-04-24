@@ -684,10 +684,18 @@ function _getCostFunction() {
             segClimbingMalus[segIdx] += movePenaltyInstance.lastClimbingMalus ?? 0;
         }
 
-        // Advance segment index when currOffset reaches the segment endpoint
+        // Advance segIdx on i,j match only (k mismatches when token is elevated:
+        // segEndOffsets uses unstripped ray.B.z while the walked path has z
+        // stripped). Also skip zero-length segments that share the same endpoint.
         const endPt = segEndOffsets[segIdx];
-        if (endPt && currOffset.i === endPt.i && currOffset.j === endPt.j && currOffset.k === endPt.k)
+        if (endPt && currOffset.i === endPt.i && currOffset.j === endPt.j) {
             segIdx++;
+            while (segIdx < segEndOffsets.length) {
+                const nextEnd = segEndOffsets[segIdx];
+                if (nextEnd.i !== currOffset.i || nextEnd.j !== currOffset.j) break;
+                segIdx++;
+            }
+        }
 
         return result;
     };
