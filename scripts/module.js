@@ -33,6 +33,7 @@ import { SCENE_GRAPH, WallTracer, WallTracerEdge, WallTracerVertex } from "./pat
 
 import { clearTokenMovementHistory } from "./Token.js";
 import { THTElevationAtPoint } from "./terrain_elevation.js";
+import { registerTourBootstrap } from "./tour.js";
 
 Hooks.once("init", function() {
   registerGeometry();
@@ -211,8 +212,9 @@ Hooks.once("init", function() {
         ruler.clear();
       }
 
-      // Simulate drag start from token
-      const origin = token.center;
+      // Simulate drag start from token. Use hex-aware getCenterPoint so multi-hex tokens
+      // (Lancer 3-hex etc.) snap correctly — token.center is just bbox center.
+      const origin = token.getCenterPoint?.() ?? token.center;
       const fakeEvent = {
         interactionData: {
           origin: { x: origin.x, y: origin.y },
@@ -222,9 +224,12 @@ Hooks.once("init", function() {
       };
       ruler._onDragStart(fakeEvent, { isTokenDrag: true });
 
-      // Measure to destination
-      const destCenter = { x: destination.x + (token.w / 2), y: destination.y + (token.h / 2) };
-      ruler.measure(destCenter);
+      // Measure to destination — same: hex-aware center, not bbox.
+      // {snap: false} prevents ruler.measure from re-snapping the (already hex-aligned) center
+      // to a neighboring hex, which is the source of multi-hex token misplacement.
+      const destCenter = token.getCenterPoint?.(destination)
+        ?? { x: destination.x + (token.w / 2), y: destination.y + (token.h / 2) };
+      ruler.measure(destCenter, { snap: false });
 
       // Extract the segment data before moving
       const segment = ruler.segments?.[ruler.segments.length - 1];
@@ -272,6 +277,9 @@ Hooks.once("setup", function() {
 Hooks.once("ready", function() {
   initTokenAnimationToolsCompat();
 });
+
+// Register the Lancer-fork tour (auto-launches once for GMs on first ready).
+registerTourBootstrap();
 
 // When a token is created on THT terrain, set its initial elevation.
 // This replaces THT's handleTokenPreCreation so THT auto-elevation can be disabled.
