@@ -69,8 +69,50 @@ Hooks.once("ready", function() {
       };
       return terrainTypes.map(t => ({ ...defaultTerrain, ...t }));
     };
+
+    Hooks.on("canvasReady", warnTerrainsNotMatchingPrecision);
+    Hooks.on("terrain-height-tools.updateTerrain", warnTerrainsNotMatchingPrecision);
   }
 });
+
+function warnTerrainsNotMatchingPrecision() {
+  if ( !game.user?.isGM ) return;
+  const tht = OTHER_MODULES.TERRAIN_HEIGHT_TOOLS;
+  if ( !tht?.ACTIVE || !tht.API?.getShapesAtPoint || !canvas.ready || !canvas.scene ) return;
+
+  // Read the precision setting directly to avoid an import cycle with settings.js.
+  const precision = Number(game.settings.get("elevationruler", "round-to-multiple")) || 0;
+  if ( !precision ) return;
+
+  const distance = canvas.scene.dimensions.distance;
+  const gridSize = canvas.grid.size;
+  const cols = Math.ceil(canvas.dimensions.width / gridSize);
+  const rows = Math.ceil(canvas.dimensions.height / gridSize);
+  const seen = new Set();
+  const offenders = new Map(); // typeName -> Set of "bottom..top"
+
+  const fits = v => Math.abs(Math.round(v / precision) - v / precision) < 1e-6;
+
+  for ( let i = 0; i < rows; i++ ) {
+    for ( let j = 0; j < cols; j++ ) {
+      const { x, y } = canvas.grid.getCenterPoint({ i, j });
+      for ( const shape of tht.API.getShapesAtPoint(x, y) ) {
+        if ( seen.has(shape) ) continue;
+        seen.add(shape);
+        const bottomFt = shape.bottom * distance;
+        const topFt = shape.top * distance;
+        if ( fits(bottomFt) && fits(topFt) ) continue;
+        const name = shape.terrainType?.name ?? shape.terrainTypeId;
+        if ( !offenders.has(name) ) offenders.set(name, new Set());
+        offenders.get(name).add(`${bottomFt}-${topFt}`);
+      }
+    }
+  }
+
+  if ( offenders.size === 0 ) return;
+  const summary = [...offenders.entries()].map(([name, ranges]) => `${name} (${[...ranges].join(", ")})`).join("; ");
+  ui.notifications.warn(`Elevation Ruler: ${offenders.size} terrain shape(s) do not fit the Round-to-Multiple precision (${precision}): ${summary}`, { permanent: true });
+}
 
 
 export const MOVEMENT_TYPES = {

@@ -182,9 +182,11 @@ function _measurePath(wrapped, waypoints, { cost }, result) {
       const thtDelta = currThtElev - prevThtElev;
       const manualDelta = (j === lastRealIdx) ? effectiveManualChange : 0;
       const stepDelta = thtDelta + manualDelta;
-      const climb = Math.abs(stepDelta);
-      if ( climb > 0 && isFlying ) {
-        totalFlyingClimb += climb;
+      const rawClimb = Math.abs(stepDelta);
+      // Snap fractional climbs to whole cells: <=0.5 above an integer rounds down (free), >0.5 rounds up.
+      const climb = Math.ceil(rawClimb - 0.5);
+      if ( rawClimb > 0 && isFlying ) {
+        totalFlyingClimb += rawClimb;
       } else if ( climb > 0 ) {
         const malus = noClimbMalus ? 0 : Math.max(0, climb - 1);
         segment.cost += climb + malus;
@@ -198,10 +200,11 @@ function _measurePath(wrapped, waypoints, { cost }, result) {
     // No 2D movement but a manual climb (e.g. user pressed [/] without dragging):
     // the per-hex loop never ran, so charge the climb here.
     if ( lastRealIdx === -1 && manualChange !== 0 ) {
-      const climb = Math.abs(manualChange);
+      const rawClimb = Math.abs(manualChange);
+      const climb = Math.ceil(rawClimb - 0.5);
       if ( isFlying ) {
-        totalFlyingClimb += climb;
-      } else {
+        totalFlyingClimb += rawClimb;
+      } else if ( climb > 0 ) {
         const malus = noClimbMalus ? 0 : Math.max(0, climb - 1);
         segment.cost += climb + malus;
         totalClimbMalus += malus;
