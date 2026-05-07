@@ -1,9 +1,9 @@
 {
     "name": "elevationruler",
-    "title": "Elevation Ruler",
+    "title": "Lancer Ruler (Lasossis's Fork)",
     "id": "elevationruler",
     "description": "Modify Foundry VTT ruler for use when dragging tokens, pathfinding, and measuring elevation.",
-    "version": "0.11.17",
+    "version": "0.11.18",
     "library": false,
     "compatibility": {
         "minimum": "12",

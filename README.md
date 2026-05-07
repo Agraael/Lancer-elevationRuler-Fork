@@ -1,4 +1,4 @@
-# Elevation Ruler (Lancer Fork)
+# Lancer Ruler (Lasossis's Fork)
 
 **GitHub Repository:** [https://github.com/Agraael/Lancer-elevationRuler-Fork](https://github.com/Agraael/Lancer-elevationRuler-Fork)
 **Original Repository:** [https://github.com/caewok/fvtt-elevation-ruler](https://github.com/caewok/fvtt-elevation-ruler)
