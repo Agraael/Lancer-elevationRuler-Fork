@@ -171,7 +171,7 @@ function renderTokenHUDHistoryButton(app, html, _data) {
   const button = createButton(
     "Clear Movement History",
     "er-clear-movement-history",
-    `<i class="fas fa-shoe-prints fa-fw"></i>`,
+    `<i class="fas fa-broom fa-fw"></i>`,
     async () => { await clearTokenMovementHistory(token); }
   );
   html.find("div.left").append(button);

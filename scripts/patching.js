@@ -56,7 +56,7 @@ export function initializePatching() {
     PATCHER.registerGroup("MOVEMENT_TRACKING");
     PATCHER.registerGroup("HISTORY_PREVIEW");
 
-    if ( game.system.id !== "dnd5e" )
+    if ( game.system.id !== "dnd5e" && game.system.id !== "lancer" )
         PATCHER.registerGroup("MOVEMENT_SELECTION");
 
     PATCHER.registerGroup("HISTORY_HUD");
